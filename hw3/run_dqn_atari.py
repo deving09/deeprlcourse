@@ -6,10 +6,25 @@ import random
 import numpy as np
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
+import os
+import uuid
+import argparse
 
 import dqn
 from dqn_utils import *
 from atari_wrappers import *
+
+#os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+
+
+def build_arg_parser():
+    parser = argparse.ArgumentParser("Run atari games using DQN Networks")
+    parser.add_argument("--game", required=True, choices=["pong", "zaxxon", "spaceinvaders", "airraid",
+                                           "assault", "beamrider", "carnival", "phoenix",
+                                           "riverraid"])
+    parser.add_argument("--ddqn", action="store_true")
+    parser.add_argument("--cuda", default="3", type=str)
+    return parser
 
 
 def atari_model(img_in, num_actions, scope, reuse=False):
@@ -30,7 +45,8 @@ def atari_model(img_in, num_actions, scope, reuse=False):
 
 def atari_learn(env,
                 session,
-                num_timesteps):
+                num_timesteps,
+                task="TEST_MODEL"):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -60,6 +76,12 @@ def atari_learn(env,
         ], outside_value=0.01
     )
 
+    rew_file = task  + str(uuid.uuid4()) + ".pkl"
+    mod_file = task + ".ckpt"
+
+    print("MODEL FILE")
+    print(mod_file)
+
     dqn.learn(
         env=env,
         q_func=atari_model,
@@ -75,7 +97,9 @@ def atari_learn(env,
         frame_history_len=4,
         target_update_freq=10000,
         grad_norm_clipping=10,
-        double_q=True
+        double_q=True,
+        rew_file=rew_file,
+        mod_file=mod_file
     )
     env.close()
 
@@ -104,7 +128,9 @@ def get_session():
     return session
 
 def get_env(task, seed):
-    env = gym.make('PongNoFrameskip-v4')
+    #env = gym.make('PongNoFrameskip-v4')
+    #env = gym.make('ZaxxonNoFrameskip-v4')
+    env = gym.make(task)
 
     set_global_seeds(seed)
     env.seed(seed)
@@ -116,15 +142,40 @@ def get_env(task, seed):
     return env
 
 def main():
+    
+    args = build_arg_parser().parse_args()
+    
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
+
+    if args.game == "pong":
+        task = 'PongNoFrameskip-v4'
+    elif args.game == "assault":
+        task = 'AssaultNoFrameskip-v4'
+    elif args.game == 'zaxxon':
+        task = 'ZaxxonNoFrameskip-v4'
+    elif args.game == 'spaceinvaders':
+        task = 'SpaceInvadersNoFrameskip-v4'
+    elif args.game == 'airraid':
+        task = 'AirRaidNoFrameskip-v4'
+    elif args.game == 'beamrider':
+        task = 'BeamRiderNoFrameskip-v4'
+    elif args.game == 'carnival':
+        task = "CarnivalNoFrameskip-v4"
+    elif args.game == "phoenix":
+        task = "PhoenixNoFrameskip-v4"
+    elif args.game == "riverraid":
+        task = "RiverraidNoFrameskip-v4"
+
     # Get Atari games.
-    task = gym.make('PongNoFrameskip-v4')
+    #task = gym.make('PongNoFrameskip-v4')
+    #task = gym.make('Zaxxon-v4')
 
     # Run training
     seed = random.randint(0, 9999)
     print('random seed = %d' % seed)
     env = get_env(task, seed)
     session = get_session()
-    atari_learn(env, session, num_timesteps=2e8)
+    atari_learn(env, session, num_timesteps=2e8, task=task)
 
 if __name__ == "__main__":
     main()
