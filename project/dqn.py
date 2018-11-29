@@ -16,6 +16,9 @@ from tensorflow.python.framework import ops
 from collections import namedtuple
 from dqn_utils import *
 
+import cv2
+import math
+
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
 class QLearner(object):
@@ -254,6 +257,13 @@ class QLearner(object):
     self.t = 0
     self._last_save = 0
 
+    template_dir = "/home/dguillory/workspace/homework/templates"
+
+    files = [ os.path.join(template_dir, f) for f in os.listdir(template_dir) if os.path.isfile(os.path.join(template_dir, f))]
+    self.templates = [cv2.imread(f, 0) for f in files]
+
+ 
+  
   def stopping_criterion_met(self):
     return self.stopping_criterion is not None and self.stopping_criterion(self.env, self.t)
 
@@ -298,6 +308,27 @@ class QLearner(object):
         epsilon = self.exploration.value(self.t)
         if random.random() < epsilon:
             action = random.randint(0, self.num_actions - 1)
+            
+            # ALL TEMPLATE MATCHING STUFF
+            net_in = self.replay_buffer.encode_recent_observation()
+            last_frame = net_in[:,:,3]
+            all_enemy_locs = []
+            player_loc = None
+            for num in range(0,len(self.templates)):
+                res = cv2.matchTemplate(last_frame,self.templates[num],cv2.TM_CCOEFF_NORMED)
+                threshold = 0.5
+                enemy_locs = np.where(res >= threshold)
+                #(_, maxVal, _, enemy_locs) = cv2.minMaxLoc(res)
+                #print(cv2.minMaxLoc(res))
+                all_enemy_locs += list(zip(list(enemy_locs[0]), list(enemy_locs[1])))
+            
+            # res = cv2.matchTemplate(last_frame,self.templates[0],cv2.TM_CCOEFF_NORMED)
+            # (_, maxVal, _, player_loc) = cv2.minMaxLoc(res)
+            # player_loc = np.where(res>=threshold)
+            object_locs = self.cluster_detections(all_enemy_locs)
+            print("enemy_locs", all_enemy_locs)
+            print("suppressed_locs", object_locs)
+            #print("player_loc", player_loc)
         else:
             input_encoding = np.expand_dims(self.replay_buffer.encode_recent_observation(), 0)
             action = self.session.run([self.best_action], feed_dict={self.obs_t_ph: input_encoding})[0]
@@ -316,6 +347,50 @@ class QLearner(object):
         self.last_obs = obs
 
     
+  def cluster_detections(self, object_locs, radius=3.0):
+      detections = {}
+
+      for i, (x_loc, y_loc) in enumerate(object_locs):
+          key = (x_loc, y_loc)
+          if key in detections:
+              print("PULLING FROM OLD")
+              clusters = detections[key]
+          else:
+              clusters = [key]
+          
+          for x2, y2 in object_locs[i+1:]:
+              dist = math.hypot(x2 - x_loc, y2 - y_loc)
+              if dist <= radius:
+                  key2 = (x2, y2)
+                  if key2 not in clusters:
+                      if key2 in detections:
+                          clusters2 = detections[key2]
+                          for tmp_key in clusters2:
+                              if tmp_key not in clusters:
+                                  clusters.append(tmp_key)
+                          
+                          detections[key2] = clusters
+                      else:
+                          clusters.append(key2)
+                          detections[key2] = clusters
+                  
+
+          detections[key] = clusters
+
+      print("Detections: ", detections)
+      final_objects = []
+      for key, clusters in detections.items():
+          inverse_clusters = list(zip(*clusters))
+          print(inverse_clusters)
+          x = round(np.mean(list(inverse_clusters[0])))
+          y = round(np.mean(list(inverse_clusters[1])))
+          point = (x, y)
+          if point not in final_objects:
+              final_objects.append(point)
+
+      return final_objects
+        
+
 
   def update_model(self):
     ### 3. Perform experience replay and train the network.
@@ -362,7 +437,8 @@ class QLearner(object):
 
       # YOUR CODE HERE
       obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = self.replay_buffer.sample(self.batch_size)
-      
+     
+ 
       if not self.model_initialized:
           """
           #with tf.variable_scope("q_func", reuse=tf.AUTO_REUSE):
@@ -456,7 +532,7 @@ class QLearner(object):
       self.mean_episode_reward = np.mean(episode_rewards[-100:])
 
 
-    if  self.t > (self.log_every_n_steps + self._last_save)  and self.mean_episode_reward > self.best_mean_episode_reward and self.model_initialized:
+    if  False: #self.t > (self.log_every_n_steps + self._last_save)  and self.mean_episode_reward > self.best_mean_episode_reward and self.model_initialized:
         print("SAVING SAVING")
         print(self.mod_file)
         self._last_save = self.t

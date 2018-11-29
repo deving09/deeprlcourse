@@ -117,14 +117,17 @@ def _process_frame84(frame):
 class ProcessFrame84(gym.Wrapper):
     def __init__(self, env=None):
         super(ProcessFrame84, self).__init__(env)
-        self.observation_space = spaces.Box(low=0, high=255, shape=(84, 84, 1))
+        #self.observation_space = spaces.Box(low=0, high=255, shape=(84, 84, 1))
+        self.observation_space = spaces.Box(low=0, high=255, shape=(210, 160, 3))
 
     def _step(self, action):
         obs, reward, done, info = self.env.step(action)
-        return _process_frame84(obs), reward, done, info
+        #return _process_frame84(obs), reward, done, info
+        return obs, reward, done, info
 
     def _reset(self):
-        return _process_frame84(self.env.reset())
+        #return _process_frame84(self.env.reset())
+        return self.env.reset()
 
 class ClippedRewardsWrapper(gym.Wrapper):
     def _step(self, action):

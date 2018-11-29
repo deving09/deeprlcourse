@@ -105,13 +105,14 @@ def atari_learn(env,
 
     uid = str(uuid.uuid4())
     preload = False
+    task2 = task + "_templates_"
     if source is not None:
-        rew_file = task + "_from_" + source + uid + ".pkl"
-        mod_file = task + "_from_" + source + uid 
+        rew_file = task2 + "_from_" + source + uid + ".pkl"
+        mod_file = task2 + "_from_" + source + uid 
         preload = True
     else:
-        rew_file =  task  + uid + ".pkl"
-        mod_file =  task + uid 
+        rew_file =  task2  + uid + ".pkl"
+        mod_file =  task2 + uid 
 
     print("MODEL FILE")
     print(mod_file)
@@ -123,7 +124,8 @@ def atari_learn(env,
         session=session,
         exploration=exploration_schedule,
         stopping_criterion=stopping_criterion,
-        replay_buffer_size=1000000,
+        #replay_buffer_size=1000000,
+        replay_buffer_size=100000,
         batch_size=32,
         gamma=0.99,
         learning_starts=50000,
