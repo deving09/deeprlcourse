@@ -318,16 +318,18 @@ class QLearner(object):
                 res = cv2.matchTemplate(last_frame,self.templates[num],cv2.TM_CCOEFF_NORMED)
                 threshold = 0.5
                 enemy_locs = np.where(res >= threshold)
-                #(_, maxVal, _, enemy_locs) = cv2.minMaxLoc(res)
-                #print(cv2.minMaxLoc(res))
-                all_enemy_locs += list(zip(list(enemy_locs[0]), list(enemy_locs[1])))
-            
+                enemy_locs = list(zip(list(enemy_locs[0]), list(enemy_locs[1])))
+                suppressed_locs = self.cluster_detections(enemy_locs)
+                labeled_objects = [(x,y, num) for x,y in suppressed_locs]
+                #all_enemy_locs += list(zip(list(enemy_locs[0]), list(enemy_locs[1])))
+                all_enemy_locs += labeled_objects
+
             # res = cv2.matchTemplate(last_frame,self.templates[0],cv2.TM_CCOEFF_NORMED)
             # (_, maxVal, _, player_loc) = cv2.minMaxLoc(res)
             # player_loc = np.where(res>=threshold)
-            object_locs = self.cluster_detections(all_enemy_locs)
+            #object_locs = self.cluster_detections(all_enemy_locs)
             print("enemy_locs", all_enemy_locs)
-            print("suppressed_locs", object_locs)
+            #print("suppressed_locs", object_locs)
             #print("player_loc", player_loc)
         else:
             input_encoding = np.expand_dims(self.replay_buffer.encode_recent_observation(), 0)
@@ -353,8 +355,10 @@ class QLearner(object):
       for i, (x_loc, y_loc) in enumerate(object_locs):
           key = (x_loc, y_loc)
           if key in detections:
-              print("PULLING FROM OLD")
+              #print("PULLING FROM OLD")
               clusters = detections[key]
+              #print("Clusters: ", clusters)
+              #print("key: ", key)
           else:
               clusters = [key]
           
@@ -375,13 +379,12 @@ class QLearner(object):
                           detections[key2] = clusters
                   
 
-          detections[key] = clusters
+          #detections[key] = clusters
 
-      print("Detections: ", detections)
+      #print("Detections: ", detections)
       final_objects = []
       for key, clusters in detections.items():
           inverse_clusters = list(zip(*clusters))
-          print(inverse_clusters)
           x = round(np.mean(list(inverse_clusters[0])))
           y = round(np.mean(list(inverse_clusters[1])))
           point = (x, y)
