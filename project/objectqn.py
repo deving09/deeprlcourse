@@ -25,14 +25,21 @@ OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedu
 def attention_model(objects_in, num_slots,  scope, reuse=False, beta=20.0):
 
     with tf.variable_scope(scope, reuse=reuse):
+        #out = layers.flatten(objects_in)
+        s = tf.shape(objects_in)
         out = objects_in
-        
+        #out = tf.reshape(objects_in, [-1 ,s[2]]) 
+        print("Objects shape: ", out)
+        out = tf.reshape(objects_in, [-1 ,2]) 
+        print("Objects shape: ", out)
         out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
         out = layers.fully_connected(out, num_outputs=64, activation_fn=tf.nn.relu)
         out = layers.fully_connected(out, num_outputs=num_slots, activation_fn=None)
-        
+        out = tf.reshape(out, [-1, 50, num_slots])
+
+        print("Out: ", out)
         softm = tf.exp(out * beta) / tf.reduce_sum(tf.exp(out * beta), 1)
-        att = tf.reduce_mean(softm * objects_in, 1)
+        att = tf.reduce_mean(tf.tensordot(softm, objects_in, 2), 1)
         return att
 
 def vision_model(img_in, scope, reuse=False):
@@ -55,14 +62,14 @@ def policy_model(representations, num_actions, scope, reuse=False):
             out = layers.fully_connected(out, num_outputs=512,         activation_fn=tf.nn.relu)
             out = layers.fully_connected(out, num_outputs=num_actions, activation_fn=None)
 
-   return out
+    return out
 
 def template_matching(last_frame, templates, threshold=0.5):
 
     # ALL TEMPLATE MATCHING STUFF
     all_object_locs = []
-    for num in range(0,len(self.templates)):
-        res = cv2.matchTemplate(last_frame,self.templates[num],cv2.TM_CCOEFF_NORMED)
+    for num in range(0,len(templates)):
+        res = cv2.matchTemplate(last_frame, templates[num],cv2.TM_CCOEFF_NORMED)
         object_locs = np.where(res >= threshold)
         object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
         suppressed_locs = cluster_detections(object_locs)
@@ -110,6 +117,12 @@ def cluster_detections( object_locs, radius=3.0):
 
   return final_objects
 
+def padding_func(xs, max_size, dims=1):
+  l = len(xs)
+  for _ in range(l, max_size):
+      xs.append([0 for a in range(dims)])
+  return xs[:max_size]
+
 class QLearner(object):
 
   def __init__(
@@ -134,7 +147,10 @@ class QLearner(object):
     mod_file=None,
     src_task=None,
     target_task=None,
-    preload=False):
+    preload=False,
+    vision=True,
+    objects=True,
+    max_length=50):
     """Run Deep Q-learning algorithm.
 
     You can specify your own convnet using q_func.
@@ -161,8 +177,15 @@ class QLearner(object):
         Specifying the constructor and kwargs, as well as learning rate schedule
         for the optimizer
     session: tf.Session
-        tensorflow session to use.
+        tensorflow session to use
+
+
+        f;lfsdlfs
+
+
+
     exploration: rl_algs.deepq.utils.schedules.Schedule
+        :q
         schedule for probability of chosing random action.
     stopping_criterion: (env, t) -> bool
         should return true when it's ok for the RL algorithm to stop.
@@ -205,6 +228,10 @@ class QLearner(object):
     self.src_task = src_task
     self.target_task = target_task
     self.preload = preload
+    self.vision = vision
+    self.objects = objects
+    self.num_slots = 3
+    self.max_length = max_length
     
     template_dir = "/home/dguillory/workspace/homework/templates"
 
@@ -232,14 +259,23 @@ class QLearner(object):
         # placeholder for templates
         self.template_loc_ph = tf.placeholder(
                 tf.float32,
-                shape=(None, None, 2)
+                shape=(None, self.max_length, 2), #shape=(None, None, 2),
                 name="templates"
                 )
 
         self.template_class_ph = tf.placeholder(
-                tf.uint8, shape=(None, None, 1),
+                tf.uint8, shape=(None, self.max_length, 1),
                 name="object_class")
 
+        self.template_loc_t_ph = tf.placeholder(
+                tf.float32,
+                shape=(None, self.max_length, 2),
+                name="templates_next"
+                )
+
+        self.template_class_t_ph = tf.placeholder(
+                tf.uint8, shape=(None, self.max_length, 1),
+                name="object_class_next")
 
         # placeholder for current observation (or state)
         self.obs_t_ph              = tf.placeholder(
@@ -288,40 +324,21 @@ class QLearner(object):
         # YOUR CODE HERE
         self.tot_errs = []
 
-        # Templates
 
-        if self.objects:
-            # Do Processing for template matching
-            object_one_hot = tf.one_hot(self.template_class_ph, self.template_cnt)
-            object_candidates = tf.concat([self.template_loc_ph, object_one_hot], 2)
-            att_rep = attention_model(object_candidates, self.num_slots, scope="attention_model", reuse=False)
-
-        if self.vision:
-            # Do Processing for visual parts
-            vision_rep = vision_model(obs_t_float, scope="vision_model", reuse=False)
-
-        if self.objects and self.vision:
-            rep = tf.concat([vision_rep, att_rep], 2))
-        elif self.objects:
-            rep = att_rep
-        else:
-            rep = vision_rep
-        
-
-
-        base_model = policy_model(rep, self.num_actions, scope="q_func", reuse=False)
+        base_model = self.build_q_func(self.template_loc_ph, self.template_class_ph, obs_t_float, scope="q_func", reuse=False)
         one_hot = tf.one_hot(self.act_t_ph, self.num_actions)
         base_q = tf.reduce_sum(tf.multiply(base_model, one_hot),  axis=1)
       
         if double_q:
             print("Double DQN")
-            target_q_net = q_func(obs_tp1_float, self.num_actions, scope="q_func", reuse=True)
+            target_q_net = self.build_q_func(self.template_loc_t_ph, self.template_class_t_ph, obs_tp1_float, scope="q_func", reuse=True)
             max_action = tf.argmax(target_q_net, axis=1)
-            target_q_est = q_func(obs_tp1_float, self.num_actions, scope="target_q_func", reuse=False)
+            target_q_est = self.build_q_func(self.template_loc_t_ph, self.template_class_t_ph, obs_tp1_float, scope="target_q_func", reuse=False)
             action_filter = tf.one_hot(max_action, self.num_actions)
             max_q = tf.reduce_sum(tf.multiply(action_filter, target_q_est), axis=1)
         else:
-            max_q = tf.reduce_max(q_func(obs_tp1_float, self.num_actions, scope="target_q_func", reuse=False), axis=1)
+            target_q_est = self.build_q_func(self.template_loc_t_ph, self.template_class_t_ph, obs_tp1_float, scope="target_q_func", reuse=False)
+            max_q = tf.reduce_max(target_q_est, axis=1)
     
         q_contribution = tf.multiply(1.0 - self.done_mask_ph, gamma * max_q)
         target_q = self.rew_t_ph + q_contribution  
@@ -373,7 +390,29 @@ class QLearner(object):
     self._last_save = 0
 
 
- 
+  def build_q_func(self, template_loc_ph, template_class_ph, obs_t_float, scope, reuse=False):
+    
+    # Templates
+    if self.objects:
+        # Do Processing for template matching
+        object_one_hot = tf.squeeze(tf.one_hot(template_class_ph + 1, self.template_cnt + 1))
+        #object_candidates = tf.concat([template_loc_ph, object_one_hot], 2)
+        object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
+        att_rep = attention_model(object_candidates, self.num_slots, scope=scope+"_attention_model", reuse=reuse)
+        print(att_rep)
+
+    if self.vision:
+        # Do Processing for visual parts
+        vision_rep = vision_model(obs_t_float, scope=scope+ "_vision_model", reuse=reuse)
+
+    if self.objects and self.vision:
+        rep = tf.concat([vision_rep, att_rep], 2)
+    elif self.objects:
+        rep = att_rep
+    else:
+        rep = vision_rep
+
+    return policy_model(rep, self.num_actions, scope=scope, reuse=reuse)
   
   def stopping_criterion_met(self):
     return self.stopping_criterion is not None and self.stopping_criterion(self.env, self.t)
@@ -426,8 +465,8 @@ class QLearner(object):
             input_encoding = np.expand_dims(net_in, 0)
             last_frame = net_in[:, :, 3]
             objects = template_matching(last_frame, self.templates) #add threshold arg
-            template_loc = np.array([[x, y] for x, y, l in objects])
-            template_class = np.array([l, for x, y, l in objects]) 
+            template_loc =np.expand_dims(np.array(padding_func([[x, y] for x, y, l in objects], self.max_length, 2)), 0)
+            template_class = np.expand_dims(np.array(padding_func([[l] for x, y, l in objects], self.max_length, 1)), 0)
             action = self.session.run([self.best_action], feed_dict={self.obs_t_ph: input_encoding,
                                                                      self.template_loc_ph: template_loc,
                                                                      self.template_class_ph: template_class})[0]
@@ -493,7 +532,42 @@ class QLearner(object):
       #####
 
       # YOUR CODE HERE
+
+
       obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = self.replay_buffer.sample(self.batch_size)
+
+      object_locs_batch = []
+      object_class_batch = []
+      next_object_locs_batch = []
+      next_object_class_batch = []
+      for i in range(self.batch_size):
+          net_in = obs_batch[i]
+          last_frame = net_in[:, :, 3]
+          objects = template_matching(last_frame, self.templates) #add threshold arg
+          template_loc = [[x, y] for x, y, l in objects]
+          template_loc = np.array(padding_func(template_loc, self.max_length, 2))
+
+          template_class = [[l] for x, y, l in objects]
+          template_class = np.array(padding_func(template_class, self.max_length, 1))
+          object_locs_batch.append(template_loc)
+          object_class_batch.append(template_class)
+
+          next_in = next_obs_batch[i]
+          next_frame = net_in[:, :, 3]
+          next_objects = template_matching(next_frame, self.templates) #add threshold arg
+          next_template_loc = [[x, y] for x, y, l in next_objects]
+          next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
+          next_template_class = [[l] for x, y, l in next_objects]
+          next_template_class = np.array(padding_func(next_template_class, self.max_length, 1))
+          next_object_locs_batch.append(next_template_loc)
+          next_object_class_batch.append(next_template_class)
+          
+      
+      object_locs_batch  = np.array(object_locs_batch)
+      object_class_batch = np.array(object_class_batch)
+      next_object_locs_batch  = np.array(next_object_locs_batch)
+      next_object_class_batch = np.array(next_object_class_batch)
+
      
  
       if not self.model_initialized:
@@ -544,7 +618,11 @@ class QLearner(object):
 									       self.rew_t_ph: rew_batch,
 									       self.obs_tp1_ph: next_obs_batch,
 									       self.done_mask_ph: done_mask,
-									       self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t)
+									       self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t),
+                                                                               self.template_loc_ph: object_locs_batch,
+                                                                               self.template_class_ph: object_class_batch,
+                                                                               self.template_loc_t_ph: next_object_locs_batch,
+                                                                               self.template_class_t_ph: next_object_class_batch
                                                                                })
       self.tot_errs.append(tot_err)
       if self.num_param_updates % 10000 == 0:
@@ -560,7 +638,11 @@ class QLearner(object):
 						       self.rew_t_ph: rew_batch,
 						       self.obs_tp1_ph: next_obs_batch,
 						       self.done_mask_ph: done_mask,
-						       self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t) 
+						       self.learning_rate: self.optimizer_spec.lr_schedule.value(self.t),
+                                                       self.template_loc_ph: object_locs_batch,
+                                                       self.template_class_ph: object_class_batch,
+                                                       self.template_loc_t_ph: next_object_locs_batch,
+                                                       self.template_class_t_ph: next_object_class_batch
 						       })
 
       self.num_param_updates += 1

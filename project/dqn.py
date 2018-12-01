@@ -355,10 +355,7 @@ class QLearner(object):
       for i, (x_loc, y_loc) in enumerate(object_locs):
           key = (x_loc, y_loc)
           if key in detections:
-              #print("PULLING FROM OLD")
               clusters = detections[key]
-              #print("Clusters: ", clusters)
-              #print("key: ", key)
           else:
               clusters = [key]
           
@@ -379,9 +376,7 @@ class QLearner(object):
                           detections[key2] = clusters
                   
 
-          #detections[key] = clusters
 
-      #print("Detections: ", detections)
       final_objects = []
       for key, clusters in detections.items():
           inverse_clusters = list(zip(*clusters))
