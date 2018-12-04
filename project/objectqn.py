@@ -39,7 +39,27 @@ def attention_model(objects_in, num_slots,  scope, reuse=False, beta=20.0):
 
         print("Out: ", out)
         softm = tf.exp(out * beta) / tf.reduce_sum(tf.exp(out * beta), 1)
-        att = tf.reduce_mean(tf.tensordot(softm, objects_in, 2), 1)
+        print("soft max: ", softm)
+        print("objects in:" , objects_in)
+        att = tf.tensordot(softm, objects_in, 2)
+        print("Att dot: ", att)
+        print("Att Dot 22: ", tf.tensordot(softm, objects_in, [[2], [2]]))
+
+        objects_reshape = tf.reshape(objects_in, [-1, 2, 50])
+        softm_reshape = tf.reshape(softm, [-1, num_slots, 50])
+
+        print("reshape objects: ", objects_reshape)
+        print("reshape softm: ", softm_reshape)
+        new_att = tf.cross(softm_reshape, objects_reshape)
+        print("new attn: ", new_att)
+        """just_see = tf.multiply(softm, objects_in)
+        print("Do Prod: ", just_see) """
+
+        #cross = tf.cross(softm, objects_in)
+        #print("Cross: ", cross)
+        
+        att = tf.reduce_mean(att, 1)
+        print("Att final: ", att)
         return att
 
 def vision_model(img_in, scope, reuse=False):
