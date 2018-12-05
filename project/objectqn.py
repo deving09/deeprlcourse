@@ -37,7 +37,7 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
         out = layers.fully_connected(out, num_outputs=num_slots, activation_fn=None)
         out = tf.reshape(out, [-1, max_length, num_slots])
 
-        softm = tf.exp(out * beta) / tf.reduce_sum(tf.exp(out * beta), 1)
+        softm = tf.exp(out * beta) /tf.expand_dims( tf.reduce_sum(tf.exp(out * beta), 1), 1)
 
         softm_reshape = tf.reshape(softm, [-1, num_slots, max_length])
 
@@ -80,7 +80,7 @@ def template_matching(last_frame, templates, threshold=0.5):
         labeled_objects = [(x,y, num) for x,y in suppressed_locs]
         all_object_locs += labeled_objects
 
-    print("object_locs", all_object_locs)
+    #print("object_locs", all_object_locs)
     
     return all_object_locs
 
@@ -154,7 +154,7 @@ class QLearner(object):
     preload=False,
     vision=True,
     objects=True,
-    max_length=50):
+    max_length=5):
     """Run Deep Q-learning algorithm.
 
     You can specify your own convnet using q_func.
@@ -387,7 +387,7 @@ class QLearner(object):
     self.mean_episode_reward      = -float('nan')
     self.best_mean_episode_reward = -float('inf')
     self.last_obs = self.env.reset()
-    self.log_every_n_steps = 10000
+    self.log_every_n_steps = 10 # 10000
     self.log_data = []
     self.start_time = None
     self.t = 0
