@@ -84,6 +84,10 @@ def template_matching(last_frame, templates, threshold=0.5):
     
     return all_object_locs
 
+def template_matching_fft(last_frame, templates, threshold=0.5):
+    f = np.fft.fft2(last_frame)
+    fshift = np.fft.fftshift(f)
+
 def cluster_detections( object_locs, radius=3.0):
   detections = {}
 
@@ -152,9 +156,9 @@ class QLearner(object):
     src_task=None,
     target_task=None,
     preload=False,
-    vision=True,
+    vision=False, # True,
     objects=True,
-    max_length=5):
+    max_length=50):
     """Run Deep Q-learning algorithm.
 
     You can specify your own convnet using q_func.
@@ -387,7 +391,7 @@ class QLearner(object):
     self.mean_episode_reward      = -float('nan')
     self.best_mean_episode_reward = -float('inf')
     self.last_obs = self.env.reset()
-    self.log_every_n_steps = 10 # 10000
+    self.log_every_n_steps =  100 #10000
     self.log_data = []
     self.start_time = None
     self.t = 0
