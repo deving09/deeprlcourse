@@ -84,9 +84,31 @@ def template_matching(last_frame, templates, threshold=0.5):
     
     return all_object_locs
 
-def template_matching_fft(last_frame, templates, threshold=0.5):
-    f = np.fft.fft2(last_frame)
-    fshift = np.fft.fftshift(f)
+def template_matching_fft(last_frame, templates, threshold=0.05):
+    bx = last_frame.shape[0]
+    by = last_frame.shape[1]
+
+    all_object_locs = []
+    Ga = np.fft.fft2(last_frame)
+    for num in range(0, len(templates)):
+        tx = last_frame.shape[0]
+        ty = last_frame.shape[1]
+        Gb = np.fft.fft2(templates[num], [bx, by])
+
+        res =  np.absolute(np.real(np.fft.ifft2(np.divide(np.multiply(Ga, np.conj(Gb)), np.absolute(np.multiply(Ga, np.conj(Gb)))))))
+        #print("RES: ", res)
+        #print("Max: ", np.max(res))
+        #1/0
+        object_locs = np.where(res >= threshold)
+        #print("Object Locs: ", object_locs)
+        object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
+        suppressed_locs = cluster_detections(object_locs)
+        labeled_objects = [(x,y, num) for x,y in suppressed_locs]
+        all_object_locs += labeled_objects
+
+    print("all objects locs", all_object_locs)
+    return all_object_locs
+
 
 def cluster_detections( object_locs, radius=3.0):
   detections = {}
@@ -472,7 +494,8 @@ class QLearner(object):
 
             input_encoding = np.expand_dims(net_in, 0)
             last_frame = net_in[:, :, 3]
-            objects = template_matching(last_frame, self.templates) #add threshold arg
+            #objects = template_matching(last_frame, self.templates) #add threshold arg
+            objects = template_matching_fft(last_frame, self.templates) #add threshold arg
             template_loc =np.expand_dims(np.array(padding_func([[x, y] for x, y, l in objects], self.max_length, 2)), 0)
             template_class = np.expand_dims(np.array(padding_func([[l] for x, y, l in objects], self.max_length, 1)), 0)
             action = self.session.run([self.best_action], feed_dict={self.obs_t_ph: input_encoding,
@@ -551,7 +574,8 @@ class QLearner(object):
       for i in range(self.batch_size):
           net_in = obs_batch[i]
           last_frame = net_in[:, :, 3]
-          objects = template_matching(last_frame, self.templates) #add threshold arg
+          #objects = template_matching(last_frame, self.templates) #add threshold arg
+          objects = template_matching_fft(last_frame, self.templates) #add threshold arg
           template_loc = [[x, y] for x, y, l in objects]
           template_loc = np.array(padding_func(template_loc, self.max_length, 2))
 
@@ -562,7 +586,7 @@ class QLearner(object):
 
           next_in = next_obs_batch[i]
           next_frame = net_in[:, :, 3]
-          next_objects = template_matching(next_frame, self.templates) #add threshold arg
+          next_objects = template_matching_fft(next_frame, self.templates) #add threshold arg
           next_template_loc = [[x, y] for x, y, l in next_objects]
           next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
           next_template_class = [[l] for x, y, l in next_objects]
