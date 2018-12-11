@@ -28,9 +28,9 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
         #out = layers.flatten(objects_in)
         s = tf.shape(objects_in)
         out = objects_in
-        #out = tf.reshape(objects_in, [-1 ,s[2]]) 
+        #out = tf.reshape(objects_in, [-1 ,s[2]])
         print("Objects shape: ", out)
-        out = tf.reshape(objects_in, [-1 ,2]) 
+        out = tf.reshape(objects_in, [-1 ,2])
         print("Objects shape: ", out)
         out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
         out = layers.fully_connected(out, num_outputs=64, activation_fn=tf.nn.relu)
@@ -81,7 +81,7 @@ def template_matching(last_frame, templates, threshold=0.5):
         all_object_locs += labeled_objects
 
     #print("object_locs", all_object_locs)
-    
+
     return all_object_locs
 
 def template_matching_fft(last_frame, templates, threshold=0.05):
@@ -119,7 +119,7 @@ def cluster_detections( object_locs, radius=3.0):
           clusters = detections[key]
       else:
           clusters = [key]
-      
+
       for x2, y2 in object_locs[i+1:]:
           dist = math.hypot(x2 - x_loc, y2 - y_loc)
           if dist <= radius:
@@ -130,7 +130,7 @@ def cluster_detections( object_locs, radius=3.0):
                       for tmp_key in clusters2:
                           if tmp_key not in clusters:
                               clusters.append(tmp_key)
-                      
+
                       detections[key2] = clusters
                   else:
                       clusters.append(key2)
@@ -262,8 +262,8 @@ class QLearner(object):
     self.objects = objects
     self.num_slots = 3
     self.max_length = max_length
-    
-    template_dir = "/home/dguillory/workspace/homework/templates"
+
+    template_dir = "/home/eli/Pictures/SpaceInvaders"
 
     files = [ os.path.join(template_dir, f) for f in os.listdir(template_dir) if os.path.isfile(os.path.join(template_dir, f))]
     self.templates = [cv2.imread(f, 0) for f in files]
@@ -272,7 +272,7 @@ class QLearner(object):
     ###############
     # BUILD MODEL #
     ###############
-    
+
     if True:
         if len(self.env.observation_space.shape) == 1:
             # This means we are running on low-dimensional observations (e.g. RAM)
@@ -283,7 +283,7 @@ class QLearner(object):
             print("INPUT SHAPE")
             print(input_shape)
         self.num_actions = self.env.action_space.n
-    
+
         # set up placeholders
 
         # placeholder for templates
@@ -323,7 +323,7 @@ class QLearner(object):
         # episode, only the current state reward contributes to the target, not the
         # next state Q-value (i.e. target is just rew_t_ph, not rew_t_ph + gamma * q_tp1)
         self.done_mask_ph          = tf.placeholder(tf.float32, [None])
-    
+
         # casting to float on GPU ensures lower data transfer times.
         if lander:
           obs_t_float = self.obs_t_ph
@@ -331,7 +331,7 @@ class QLearner(object):
         else:
           obs_t_float   = tf.cast(self.obs_t_ph,   tf.float32) / 255.0
           obs_tp1_float = tf.cast(self.obs_tp1_ph, tf.float32) / 255.0
-    
+
         # Here, you should fill in your own code to compute the Bellman error. This requires
         # evaluating the current and next Q-values and constructing the corresponding error.
         # TensorFlow will differentiate this error for you, you just need to pass it to the
@@ -350,7 +350,7 @@ class QLearner(object):
         # Older versions of TensorFlow may require using "VARIABLES" instead of "GLOBAL_VARIABLES"
         # Tip: use huber_loss (from dqn_utils) instead of squared error when defining self.total_error
         ######
-    
+
         # YOUR CODE HERE
         self.tot_errs = []
 
@@ -358,7 +358,7 @@ class QLearner(object):
         base_model = self.build_q_func(self.template_loc_ph, self.template_class_ph, obs_t_float, scope="q_func", reuse=False)
         one_hot = tf.one_hot(self.act_t_ph, self.num_actions)
         base_q = tf.reduce_sum(tf.multiply(base_model, one_hot),  axis=1)
-      
+
         if double_q:
             print("Double DQN")
             target_q_net = self.build_q_func(self.template_loc_t_ph, self.template_class_t_ph, obs_tp1_float, scope="q_func", reuse=True)
@@ -369,37 +369,37 @@ class QLearner(object):
         else:
             target_q_est = self.build_q_func(self.template_loc_t_ph, self.template_class_t_ph, obs_tp1_float, scope="target_q_func", reuse=False)
             max_q = tf.reduce_max(target_q_est, axis=1)
-    
+
         q_contribution = tf.multiply(1.0 - self.done_mask_ph, gamma * max_q)
-        target_q = self.rew_t_ph + q_contribution  
+        target_q = self.rew_t_ph + q_contribution
         target_q = tf.stop_gradient(target_q)
         self.target_q = target_q
         self.base_q = base_q
-        self.total_error = tf.reduce_mean(huber_loss(target_q - base_q)) 
+        self.total_error = tf.reduce_mean(huber_loss(target_q - base_q))
         self.best_action = tf.argmax(base_model, axis=1)[0]
-        
+
         q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope='q_func')
-        target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="target_q_func") 
-    
+        target_q_func_vars = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="target_q_func")
+
         ######
-    
+
         # construct optimization op (with gradient clipping)
         self.learning_rate = tf.placeholder(tf.float32, (), name="learning_rate")
         optimizer = self.optimizer_spec.constructor(learning_rate=self.learning_rate, **self.optimizer_spec.kwargs)
         self.train_fn = minimize_and_clip(optimizer, self.total_error,
                      var_list=q_func_vars, clip_val=grad_norm_clipping)
-        
+
 
         #saver_dict = {v.name: v for v in tf.global_variables()}
         self.saver = tf.train.Saver() #saver_dict)
-        
+
         # update_target_fn will be called periodically to copy Q network to target Q network
         update_target_fn = []
         for var, var_target in zip(sorted(q_func_vars,        key=lambda v: v.name),
                                    sorted(target_q_func_vars, key=lambda v: v.name)):
             update_target_fn.append(var_target.assign(var))
         self.update_target_fn = tf.group(*update_target_fn)
-    
+
     # construct the replay buffer
     self.replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len, lander=lander)
     self.replay_buffer_idx = None
@@ -421,7 +421,7 @@ class QLearner(object):
 
 
   def build_q_func(self, template_loc_ph, template_class_ph, obs_t_float, scope, reuse=False):
-    
+
     # Templates
     if self.objects:
         # Do Processing for template matching
@@ -443,7 +443,7 @@ class QLearner(object):
         rep = vision_rep
 
     return policy_model(rep, self.num_actions, scope=scope, reuse=reuse)
-  
+
   def stopping_criterion_met(self):
     return self.stopping_criterion is not None and self.stopping_criterion(self.env, self.t)
 
@@ -481,14 +481,14 @@ class QLearner(object):
     #####
 
     # YOUR CODE HERE
-    last_obs = self.last_obs 
-    frame_idx = self.replay_buffer.store_frame(last_obs)    
-    
+    last_obs = self.last_obs
+    frame_idx = self.replay_buffer.store_frame(last_obs)
+
     if self.model_initialized:
         epsilon = self.exploration.value(self.t)
         if random.random() < epsilon:
             action = random.randint(0, self.num_actions - 1)
-            
+
         else:
             net_in = self.replay_buffer.encode_recent_observation()
 
@@ -503,20 +503,20 @@ class QLearner(object):
                                                                      self.template_class_ph: template_class})[0]
             #print("selected action")
             #print(action)
-                        
+
     else:
         action = random.randint(0, self.num_actions - 1)
-    
+
     obs, reward, done, info = self.env.step(action)
     self.replay_buffer.store_effect(frame_idx, action, reward, done)
-    
+
     if done:
         self.last_obs = self.env.reset()
     else:
         self.last_obs = obs
 
-    
-        
+
+
 
 
   def update_model(self):
@@ -571,11 +571,13 @@ class QLearner(object):
       object_class_batch = []
       next_object_locs_batch = []
       next_object_class_batch = []
+
       for i in range(self.batch_size):
           net_in = obs_batch[i]
           last_frame = net_in[:, :, 3]
           #objects = template_matching(last_frame, self.templates) #add threshold arg
-          objects = template_matching_fft(last_frame, self.templates) #add threshold arg
+          ###objects = template_matching_fft(last_frame, self.templates) #add threshold arg
+          objects = []
           template_loc = [[x, y] for x, y, l in objects]
           template_loc = np.array(padding_func(template_loc, self.max_length, 2))
 
@@ -586,23 +588,25 @@ class QLearner(object):
 
           next_in = next_obs_batch[i]
           next_frame = net_in[:, :, 3]
-          next_objects = template_matching(next_frame, self.templates) #add threshold arg
-          next_objects = template_matching_fft(next_frame, self.templates) #add threshold arg
+          #next_objects = template_matching(next_frame, self.templates) #add threshold arg
+          ###next_objects = template_matching_fft(next_frame, self.templates) #add threshold arg
+          next_objects = []
           next_template_loc = [[x, y] for x, y, l in next_objects]
           next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
           next_template_class = [[l] for x, y, l in next_objects]
           next_template_class = np.array(padding_func(next_template_class, self.max_length, 1))
           next_object_locs_batch.append(next_template_loc)
           next_object_class_batch.append(next_template_class)
-          
-      
+
+
+
       object_locs_batch  = np.array(object_locs_batch)
       object_class_batch = np.array(object_class_batch)
       next_object_locs_batch  = np.array(next_object_locs_batch)
       next_object_class_batch = np.array(next_object_class_batch)
 
-     
- 
+
+
       if not self.model_initialized:
           """
           #with tf.variable_scope("q_func", reuse=tf.AUTO_REUSE):
@@ -617,11 +621,11 @@ class QLearner(object):
           #self.saver.restore(self.session, "/home/dguillory/workspace/homework/models/ZaxxonNoFrameskip-v4.ckpt")
           #self.save_model()
           #1/0
-          
+
           initialize_interdependent_variables(self.session, tf.global_variables(), {
               self.obs_t_ph: obs_batch,
               self.obs_tp1_ph: next_obs_batch})
-          
+
           if self.preload and self.src_task is not None:
               #chkp.print_tensors_in_checkpoint_file("/home/dguillory/workspace/homework/test_models/" + self.src_task + "/variables/variables", tensor_name='', all_tensors=True)
               print ("BREAK After test models \n\n")
@@ -635,16 +639,16 @@ class QLearner(object):
               saver = tf.train.Saver(variables_to_restore)
 
               saver.restore(self.session, "/home/dguillory/workspace/homework/models/" + self.src_task +".ckpt")
-              
+
               #print("/home/dguillory/workspace/homework/test_models/" + self.src_task)
               #tf.saved_model.loader.load(self.session, [tf.saved_model.tag_constants.TRAINING], "/home/dguillory/workspace/homework/test_models/" + self.src_task)
               print("AFTER LOAD")
               print(tf.global_variables())
               #print([n.name for n in tf.get_default_graph().as_graph_def().node])
 
-          
+
           self.model_initialized = True
-      
+
       gradients, tot_err, target_q, base_q = self.session.run([self.train_fn, self.total_error, self.target_q, self.base_q], feed_dict={
                                                                                self.obs_t_ph: obs_batch,
                                                                                self.act_t_ph: act_batch,
@@ -751,4 +755,3 @@ def learn(*args, **kwargs):
     # observation
     alg.update_model()
     alg.log_progress()
-

@@ -108,11 +108,11 @@ def atari_learn(env,
     task2 = task + "_templates_"
     if source is not None:
         rew_file = task2 + "_from_" + source + uid + ".pkl"
-        mod_file = task2 + "_from_" + source + uid 
+        mod_file = task2 + "_from_" + source + uid
         preload = True
     else:
         rew_file =  task2  + uid + ".pkl"
-        mod_file =  task2 + uid 
+        mod_file =  task2 + uid
 
     print("MODEL FILE")
     print(mod_file)
@@ -160,8 +160,8 @@ def set_global_seeds(i):
 def get_session():
     tf.reset_default_graph()
     tf_config = tf.ConfigProto(
-        inter_op_parallelism_threads=1,
-        intra_op_parallelism_threads=1)
+        inter_op_parallelism_threads=0,
+        intra_op_parallelism_threads=0)
     session = tf.Session(config=tf_config)
     print("AVAILABLE GPUS: ", get_available_gpus())
     return session
@@ -181,9 +181,9 @@ def get_env(task, seed):
     return env
 
 def main():
-    
+
     args = build_arg_parser().parse_args()
-    
+
     os.environ["CUDA_VISIBLE_DEVICES"] = args.cuda
 
     if args.game == "pong":
@@ -205,7 +205,7 @@ def main():
     elif args.game == "riverraid":
         task = "RiverraidNoFrameskip-v4"
 
-    
+
     second_task = None
     if args.model == "visual":
         if args.source == "pong":
@@ -226,8 +226,8 @@ def main():
             second_task = "PhoenixNoFrameskip-v4"
         elif args.source == "riverraid":
             second_task = "RiverraidNoFrameskip-v4"
-        
-        model = atari_visual_freeze 
+
+        model = atari_visual_freeze
     else:
         model = atari_model
 
