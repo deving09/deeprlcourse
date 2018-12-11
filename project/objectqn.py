@@ -8,6 +8,9 @@ import numpy as np
 import random
 import shutil
 import os
+from multiprocessing import Pool
+from functools import partial
+
 
 import tensorflow                as tf
 import tensorflow.contrib.layers as layers
@@ -68,21 +71,22 @@ def policy_model(representations, num_actions, scope, reuse=False):
 
     return out
 
-def template_matching(last_frame, templates, threshold=0.5):
+def template_matching(last_frame, enum_template, threshold=0.5):
 
     # ALL TEMPLATE MATCHING STUFF
-    all_object_locs = []
-    for num in range(0,len(templates)):
-        res = cv2.matchTemplate(last_frame, templates[num],cv2.TM_CCOEFF_NORMED)
-        object_locs = np.where(res >= threshold)
-        object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
-        suppressed_locs = cluster_detections(object_locs)
-        labeled_objects = [(x,y, num) for x,y in suppressed_locs]
-        all_object_locs += labeled_objects
-
-    #print("object_locs", all_object_locs)
+    num, template = enum_template
     
-    return all_object_locs
+    res = cv2.matchTemplate(last_frame, template ,cv2.TM_CCOEFF_NORMED)
+    object_locs = np.where(res >= threshold)
+    object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
+    suppressed_locs = cluster_detections(object_locs)
+    labeled_objects = [(x,y, num) for x,y in suppressed_locs]
+    
+    return labeled_objects
+
+#def tm_tf(img_in, template_in, scope, reuse=False):
+#    with tf.variable_scope(scope, reuse=reuse):
+
 
 def template_matching_fft(last_frame, templates, threshold=0.05):
     bx = last_frame.shape[0]
@@ -178,7 +182,7 @@ class QLearner(object):
     src_task=None,
     target_task=None,
     preload=False,
-    vision=False, # True,
+    vision= True,
     objects=True,
     max_length=50):
     """Run Deep Q-learning algorithm.
@@ -262,6 +266,9 @@ class QLearner(object):
     self.objects = objects
     self.num_slots = 3
     self.max_length = max_length
+    self.threshold = 0.5
+
+    self.pool = Pool(processes=16)
     
     template_dir = "/home/dguillory/workspace/homework/templates"
 
@@ -494,7 +501,14 @@ class QLearner(object):
 
             input_encoding = np.expand_dims(net_in, 0)
             last_frame = net_in[:, :, 3]
-            objects = template_matching(last_frame, self.templates) #add threshold arg
+
+            p_tm = partial(template_matching, last_frame, threshold=self.threshold)
+            objects_lists = self.pool.map(p_tm, enumerate(self.templates))
+            objects = objects_lists[0]
+            #for o in objects_lists:
+            #    objects.extend(o)
+
+            #objects = template_matching(last_frame, self.templates) #add threshold arg
             #objects = template_matching_fft(last_frame, self.templates) #add threshold arg
             template_loc =np.expand_dims(np.array(padding_func([[x, y] for x, y, l in objects], self.max_length, 2)), 0)
             template_class = np.expand_dims(np.array(padding_func([[l] for x, y, l in objects], self.max_length, 1)), 0)
@@ -574,8 +588,15 @@ class QLearner(object):
       for i in range(self.batch_size):
           net_in = obs_batch[i]
           last_frame = net_in[:, :, 3]
+          
+          p_tm = partial(template_matching, last_frame, threshold=self.threshold)
+          objects_lists = self.pool.map(p_tm, enumerate(self.templates))
+          objects = objects_lists[0] #[]
+          #for o in objects_lists:
+          #    objects.extend(o)
+          
           #objects = template_matching(last_frame, self.templates) #add threshold arg
-          objects = template_matching_fft(last_frame, self.templates) #add threshold arg
+          #objects = template_matching_fft(last_frame, self.templates) #add threshold arg
           template_loc = [[x, y] for x, y, l in objects]
           template_loc = np.array(padding_func(template_loc, self.max_length, 2))
 
@@ -586,8 +607,15 @@ class QLearner(object):
 
           next_in = next_obs_batch[i]
           next_frame = net_in[:, :, 3]
-          next_objects = template_matching(next_frame, self.templates) #add threshold arg
-          next_objects = template_matching_fft(next_frame, self.templates) #add threshold arg
+          
+          p_tm = partial(template_matching, next_frame, threshold=self.threshold)
+          next_objects_lists = self.pool.map(p_tm, enumerate(self.templates))
+          next_objects = next_objects_lists[0] #[]
+          #for o in next_objects_lists:
+          #    next_objects.extend(o)
+          
+          #next_objects = template_matching(next_frame, self.templates) #add threshold arg
+          #next_objects = template_matching_fft(next_frame, self.templates) #add threshold arg
           next_template_loc = [[x, y] for x, y, l in next_objects]
           next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
           next_template_class = [[l] for x, y, l in next_objects]
@@ -738,6 +766,9 @@ class QLearner(object):
       sys.stdout.flush()
 
       self.log_data.append({"timestep": self.t, "mean": self.mean_episode_reward, "best": self.best_mean_episode_reward})
+
+      if self.t > 52000:
+          sys.exit(1)
 
       with open(self.rew_file, 'wb') as f:
         pickle.dump(self.log_data, f, pickle.HIGHEST_PROTOCOL)
