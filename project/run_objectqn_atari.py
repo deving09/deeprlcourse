@@ -30,6 +30,7 @@ def build_arg_parser():
     parser.add_argument("--explore", default=1.0, type=float)
     parser.add_argument("--vision", action="store_true")
     parser.add_argument("--objects", action="store_true")
+    parser.add_argument("--templatedir", default="/home/workspace/homework/templates")
     parser.add_argument("--cuda", default="3", type=str)
     return parser
 
@@ -77,7 +78,8 @@ def atari_learn(env,
                 source=None,
                 explore=1.0,
                 vision=True,
-                obj=False):
+                obj=False,
+                template_dir="/home/workspace/homework/templates"):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -149,7 +151,8 @@ def atari_learn(env,
         src_task=source,
         preload=preload,
         vision=vision,
-        objects=obj
+        objects=obj,
+        template_dir=template_dir
     )
     env.close()
 
@@ -253,7 +256,7 @@ def main():
     env = get_env(task, seed)
     session = get_session()
     atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore,
-            vision=args.vision, obj=args.objects)
+            vision=args.vision, obj=args.objects, template_dir=args.template_dir)
 
 if __name__ == "__main__":
     main()

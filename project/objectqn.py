@@ -200,6 +200,7 @@ class QLearner(object):
     preload=False,
     vision= True,
     objects=True,
+    template_dir="/home/dguillory/workspace/homework/templates",
     max_length=50):
     """Run Deep Q-learning algorithm.
 
@@ -748,7 +749,7 @@ class QLearner(object):
       self.mean_episode_reward = np.mean(episode_rewards[-100:])
 
 
-    if  False: #self.t > (self.log_every_n_steps + self._last_save)  and self.mean_episode_reward > self.best_mean_episode_reward and self.model_initialized:
+    if  self.t > (self.log_every_n_steps + self._last_save)  and self.mean_episode_reward > self.best_mean_episode_reward and self.model_initialized:
         print("SAVING SAVING")
         print(self.mod_file)
         self._last_save = self.t
