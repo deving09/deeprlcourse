@@ -28,6 +28,8 @@ def build_arg_parser():
                                              "assault", "beamrider", "carnival", "phoenix",
                                              "riverraid"])
     parser.add_argument("--explore", default=1.0, type=float)
+    parser.add_argument("--vision", action="store_true")
+    parser.add_argument("--objects", action="store_true")
     parser.add_argument("--cuda", default="3", type=str)
     return parser
 
@@ -73,7 +75,9 @@ def atari_learn(env,
                 task="TEST_MODEL",
                 model=atari_model,
                 source=None,
-                explore=1.0):
+                explore=1.0,
+                vision=True,
+                obj=False):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -98,7 +102,7 @@ def atari_learn(env,
     exploration_schedule = PiecewiseSchedule(
         [
             (0,   explore),
-            (1e6, 0.1),
+            (1e5, 0.1), #(1e6, 0.1),
             (num_iterations / 2, 0.01),
         ], outside_value=0.01
     )
@@ -106,6 +110,11 @@ def atari_learn(env,
     uid = str(uuid.uuid4())
     preload = False
     task2 = task + "_templates_"
+    if vision:
+        task2 = task2 + "_vision"
+    if obj: 
+        task2 = task2 + "_obj"
+
     if source is not None:
         rew_file = task2 + "_from_" + source + uid + ".pkl"
         mod_file = task2 + "_from_" + source + uid 
@@ -138,7 +147,9 @@ def atari_learn(env,
         mod_file=mod_file,
         target_task=task,
         src_task=source,
-        preload=preload
+        preload=preload,
+        vision=vision,
+        objects=obj
     )
     env.close()
 
@@ -241,7 +252,8 @@ def main():
     print('random seed = %d' % seed)
     env = get_env(task, seed)
     session = get_session()
-    atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore)
+    atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore,
+            vision=args.vision, obj=args.objects)
 
 if __name__ == "__main__":
     main()

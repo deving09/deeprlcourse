@@ -436,7 +436,7 @@ class QLearner(object):
     self.mean_episode_reward      = -float('nan')
     self.best_mean_episode_reward = -float('inf')
     self.last_obs = self.env.reset()
-    self.log_every_n_steps =  100 #10000
+    self.log_every_n_steps =  1000 #10000
     self.log_data = []
     self.start_time = None
     self.t = 0
@@ -783,8 +783,6 @@ class QLearner(object):
 
       self.log_data.append({"timestep": self.t, "mean": self.mean_episode_reward, "best": self.best_mean_episode_reward})
 
-      if self.t > 52000:
-          sys.exit(1)
 
       with open(self.rew_file, 'wb') as f:
         pickle.dump(self.log_data, f, pickle.HIGHEST_PROTOCOL)
