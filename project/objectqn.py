@@ -113,6 +113,17 @@ def template_matching_fft(last_frame, templates, threshold=0.05):
     #print("all objects locs", all_object_locs)
     return all_object_locs
 
+def gabor_convolutions(last_frame):
+    gabor_filters = []
+    for i in range(4):
+        params = {'ksize':(12,12), 'sigma':1.0, 'theta':0, 'lambd':15.0, 'gamma'0.02}
+        filter = cv2.getGaborKernel(**params)
+        filter = tf.expand_dims(filter, 2)
+        gabor_filters.append(filter)
+    outputs = [tf.nn.convolution(last_frame, filter, "SAME") for filter in gabor_filters]
+    return outputs
+
+
 
 def cluster_detections( object_locs, radius=3.0):
   detections = {}
