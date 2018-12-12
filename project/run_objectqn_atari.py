@@ -79,7 +79,7 @@ def atari_learn(env,
                 explore=1.0,
                 vision=True,
                 obj=False,
-                template_dir="/home/workspace/homework/templates"):
+                template_dir="/home/dguillory/workspace/homework/templates"):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -256,7 +256,7 @@ def main():
     env = get_env(task, seed)
     session = get_session()
     atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore,
-            vision=args.vision, obj=args.objects, template_dir=args.template_dir)
+            vision=args.vision, obj=args.objects, template_dir=args.templatedir)
 
 if __name__ == "__main__":
     main()
