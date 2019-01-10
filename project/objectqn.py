@@ -84,14 +84,36 @@ def template_matching(last_frame, enum_template, threshold=0.5):
     
     return labeled_objects
 
-def tm_tf(img_in, template_in, scope, threshold=0.5, reuse=False):
+def tm_tf(img_in, template_in, identity_template, scope, threshold=0.5, reuse=False):
     with tf.variable_scope(scope, reuse=reuse):
-        res = tf.nn.convolution(img_in, template_in, "SAME")
-        object_locs = tf.where(res > threshold)
-        ind = tf.constant([1,2])
-        result = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind))
+        #im_in = tf.reduce_mean(im_in, axis=0)
+        # Update with sliding_window_batch replacement
+        w = tf.cast(identity_template.shape[0], tf.float32)
+        h = tf.cast(identity_template.shape[1], tf.float32)
 
-    return result
+        normed_im = img_in - tf.nn.convolution(img_in, identity_template, "SAME") / (w *h)
+        res = tf.nn.convolution(normed_im, template_in, "SAME")
+        normed_im_sq = tf.nn.convolution(tf.square(normed_im), identity_template, "SAME")
+        template_mean = tf.reduce_sum(tf.square(template_in), axis=[0,1,2])
+
+        print_op = tf.print("Normed im shape: ", normed_im.shape, "\nRes  Shape: ", res.shape,
+                "\nNormed Im Square Shape: ", normed_im_sq.shape, "\nTemplate Mean Shape: ", 
+                template_mean.shape, output_stream=sys.stderr)
+        res = res / tf.sqrt(normed_im_sq * template_mean)
+
+        object_locs = tf.where(res > threshold)
+        object_values = tf.gather_nd(res, object_locs)
+        ind = tf.constant([1,2,3])
+        ind_labels = tf.constant([4])
+
+        print_op_2 = tf.print("Object locs: ", object_locs, summarize=100,  output_stream=sys.stderr)
+
+        with tf.control_dependencies([print_op, print_op_2]):
+            locs = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind))
+            labels = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind_labels))
+    
+    return locs, labels
+    #return object_values, labels
 
 def template_matching_2(last_frame, templates, threshold=0.5):
 
@@ -101,7 +123,7 @@ def template_matching_2(last_frame, templates, threshold=0.5):
         res = cv2.matchTemplate(last_frame, templates[num],cv2.TM_CCOEFF_NORMED)
         object_locs = np.where(res >= threshold)
         object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
-        suppressed_locs = cluster_detections(object_locs)
+        suppressed_locs = object_locs #cluster_detections(object_locs)
         labeled_objects = [(x,y, num) for x,y in suppressed_locs]
         all_object_locs += labeled_objects
 
@@ -176,10 +198,10 @@ def cluster_detections( object_locs, radius=3.0):
 def padding_func(xs, max_size, dims=1):
   l = len(xs)
   for _ in range(l, max_size):
-      if dims > 1:
-          xs.append([0 for a in range(dims)])
-      else:
-          xs.append(0)
+      #if dims > 1:
+      xs.append([0 for a in range(dims)])
+      #else:
+      #    xs.append(0)
   return xs[:max_size]
 
 class QLearner(object):
@@ -301,7 +323,8 @@ class QLearner(object):
     files = [ os.path.join(template_dir, f) for f in os.listdir(template_dir) if os.path.isfile(os.path.join(template_dir, f))]
     
     #new_temp = np.expand_dims(np.expand_dims(self.templates[num], 2), 3)
-    self.templates = [np.expand_dims(cv2.imread(f, 0),2) for f in files]
+    self.templates_list = [np.expand_dims(cv2.imread(f, 0),2) for f in files]
+    self.templates =  [t - np.mean(t) for t in self.templates_list]
     self.template_cnt = len(self.templates)
 
     big_w = 0
@@ -327,10 +350,16 @@ class QLearner(object):
         print("Im Shape: ", im.shape)
         self.templates[i] = im
 
-    self.templates = np.stack(self.templates, axis=2)
+    self.templates = np.stack(self.templates, axis=3)
     print("Shape Again: ", self.templates.shape)
+    #self.templates = np.tile(self.templates, [1, 1, frame_history_len, 1])
+    self.templates = np.expand_dims(self.templates, 3)
+    print("Tiled Shape: ", self.templates.shape)
     self.templates = tf.constant(self.templates)
+    self.templates_float = tf.cast(self.templates, tf.float32) / 255.0
 
+    self.identity_template = tf.ones([big_w, big_h, 1, 1, 1], tf.float32)
+ 
     ###############
     # BUILD MODEL #
     ###############
@@ -341,8 +370,13 @@ class QLearner(object):
             input_shape = self.env.observation_space.shape
         else:
             img_h, img_w, img_c = self.env.observation_space.shape
+
+            #Place in neater locations
+            self.img_c = img_c
             input_shape = (img_h, img_w, frame_history_len * img_c)
-            input_tmp_shape =  (img_h, img_w, 1)
+            #input_tmp_shape =  (img_h, img_w, 1)
+            
+            input_tmp_shape =  (img_h, img_w, frame_history_len, 1)
             print("INPUT SHAPE")
             print(input_shape)
         self.num_actions = self.env.action_space.n
@@ -350,7 +384,8 @@ class QLearner(object):
         # set up placeholders
 
         #Object Detection PH
-        self.template_img_ph = tf.placeholder(tf.float32, shape=(None, None,1, 1),
+        #self.template_img_ph = tf.placeholder(tf.float32, shape=(big_w, big_h , 1, None),
+        self.template_img_ph = tf.placeholder(tf.float32, shape=(big_w, big_h , frame_history_len, None),
                 name="template_img")
 
         template_img_float   = tf.cast(self.template_img_ph,   tf.float32) / 255.0
@@ -407,7 +442,8 @@ class QLearner(object):
           obs_tp1_float = tf.cast(self.obs_tp1_ph, tf.float32) / 255.0
     
         #Object Detection Portion
-        self.obj_det = tm_tf(obs_obj_float, template_img_float, "object_det", threshold=self.threshold, reuse=False)
+        self.obj_det = tm_tf(obs_obj_float, self.templates_float, self.identity_template,
+                            "object_det", threshold=self.threshold, reuse=False)
         
         
         # Here, you should fill in your own code to compute the Bellman error. This requires
@@ -491,7 +527,7 @@ class QLearner(object):
     self.mean_episode_reward      = -float('nan')
     self.best_mean_episode_reward = -float('inf')
     self.last_obs = self.env.reset()
-    self.log_every_n_steps =  100 #1000 #10000
+    self.log_every_n_steps =  1000 #10000
     self.log_data = []
     self.start_time = None
     self.t = 0
@@ -534,10 +570,12 @@ class QLearner(object):
     labeled_objects = [(x,y, num) for x,y in suppressed_locs]
     return object_locs
   
-  def full_template_matching(self, frame):
+  def full_template_matching(self, frames): #frame):
     all_object_locs = []
     all_object_labels = []
-    new_frame = np.expand_dims(np.expand_dims(frame, 0), 3)
+    #new_frame = np.expand_dims(np.expand_dims(frame, 0), 3)
+    #new_frame = np.expand_dims(frames, 0)
+    new_frame = np.expand_dims(np.expand_dims(frames, 0),4)
 
 
     """
@@ -548,7 +586,16 @@ class QLearner(object):
         objects.extend(o)
 
     """
-    for num in range(0,len(self.templates)):
+    object_detections = self.session.run([self.obj_det], feed_dict={self.obs_obj_ph: new_frame})
+    object_locs = object_detections[0][0]
+    print("Object Locs In This Matching Module: ", object_locs)
+    #print("Object Locs Max, Min: ", (max(object_locs), min(object_locs)))
+    #print("Object Locs Shape: ", len(object_locs))
+    #if random.random() > 0.95: 
+    #    sys.exit(1)
+    
+    object_labels = object_detections[0][1]
+    """for num in range(0,len(self.templates)):
         new_temp = self.templates[num] #np.expand_dims(np.expand_dims(self.templates[num], 2), 3)
         #print("TEMPLATE SHAPE: ", new_temp.shape)
         object_locs = self.session.run([self.obj_det], feed_dict={self.obs_obj_ph: new_frame,
@@ -561,8 +608,8 @@ class QLearner(object):
         object_labels = [num] * len(suppressed_locs)
         all_object_locs += suppressed_locs
         all_object_labels += object_labels
-
-    return all_object_locs, all_object_labels
+    """
+    return list(object_locs), list(object_labels)
 
 
   def step_env(self):
@@ -611,9 +658,19 @@ class QLearner(object):
             net_in = self.replay_buffer.encode_recent_observation()
 
             input_encoding = np.expand_dims(net_in, 0)
-            last_frame = net_in[:, :, 3]
+            
+            #last_frame = net_in[:, :, 3]
+            last_frame = net_in[:, :, 0::self.img_c]
 
             object_locs, object_labels = self.full_template_matching(last_frame)
+            #object_locs, object_labels = self.full_template_matching(net_in)
+
+            print("Object Values: ", object_locs)
+            print("Object Values Shape: ", len(object_locs))
+
+            sys.exit(1)
+
+            # REMOVE THIS BLOCK SOON
             """
             p_tm = partial(template_matching, last_frame, threshold=self.threshold)
             objects_lists = self.pool.imap_unordered(p_tm, enumerate(self.templates))
@@ -622,10 +679,12 @@ class QLearner(object):
                 objects.extend(o)
             """
 
-            #objects = template_matching_2(last_frame, self.templates) #add threshold arg
+            #objects = template_matching_2(last_frame, self.templates_list) #add threshold arg
+            #print("Second Objects len: ", len(objects))
+            
             #objects = template_matching_fft(last_frame, self.templates) #add threshold arg
             template_loc = np.expand_dims(np.array(padding_func(object_locs, self.max_length, 2)), 0)
-            template_class = np.expand_dims(np.expand_dims(np.array(padding_func(object_labels, self.max_length, 1)), 0), 2)
+            template_class = np.expand_dims(np.array(padding_func(object_labels, self.max_length, 1)), 0)
             action = self.session.run([self.best_action], feed_dict={self.obs_t_ph: input_encoding,
                                                                      self.template_loc_ph: template_loc,
                                                                      self.template_class_ph: template_class})[0]
@@ -701,8 +760,11 @@ class QLearner(object):
       next_object_class_batch = []
       for i in range(self.batch_size):
           net_in = obs_batch[i]
-          last_frame = net_in[:, :, 3]
+          #last_frame = net_in[:, :, 3]
+          last_frame = net_in[:, :, ::self.img_c]
           
+          
+          # Remove THIS Block SOON
           """
           p_tm = partial(template_matching, last_frame, threshold=self.threshold)
           objects_lists = self.pool.imap_unordered(p_tm, enumerate(self.templates))
@@ -710,9 +772,19 @@ class QLearner(object):
           for o in objects_lists:
               objects.extend(o)
           """
-
+          
+          #print("first frame")
           object_locs, object_labels = self.full_template_matching(last_frame)
-          #objects = template_matching_2(last_frame, self.templates) #add threshold arg
+          
+          print("Object Values: ", object_locs)
+          print("Object Values Shape: ", len(object_locs))
+          sys.exit(1)
+          #object_locs, object_labels = self.full_template_matching(net_in)
+          
+          # Remove IMMEDIATELY
+          #objects = template_matching_2(last_frame, self.templates_list) #add threshold arg
+          #print("Second Objects Len: ", len(objects))
+          
           #objects = template_matching_fft(last_frame, self.templates) #add threshold arg
           template_loc = object_locs
           template_loc = np.array(padding_func(template_loc, self.max_length, 2))
@@ -723,9 +795,12 @@ class QLearner(object):
           object_class_batch.append(template_class)
 
           next_in = next_obs_batch[i]
-          next_frame = net_in[:, :, 3]
+          #next_frame = next_in[:, :, 3]
+          next_frame = next_in[:, :, ::self.img_c]
           
+          #print("next frame")
           next_object_locs, next_object_labels = self.full_template_matching(next_frame)
+          #next_object_locs, next_object_labels = self.full_template_matching(next_in)
           """p_tm = partial(template_matching, next_frame, threshold=self.threshold)
           next_objects_lists = self.pool.imap_unordered(p_tm, enumerate(self.templates))
           next_objects = []
@@ -733,8 +808,11 @@ class QLearner(object):
               next_objects.extend(o)
           """
 
-          #next_objects = template_matching_2(next_frame, self.templates) #add threshold arg
-          #next_objects = template_matching_fft(next_frame, self.templates) #add threshold arg
+          #next_objects = template_matching_2(next_frame, self.templates_list) #add threshold arg
+          #next_objects = template_matching_fft(next_frame, self.templates_list) #add threshold arg
+          #print("Second Objects Len: ", len(next_objects))
+          
+          
           next_template_loc = next_object_locs
           next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
           next_template_class = next_object_labels
@@ -751,10 +829,10 @@ class QLearner(object):
           print("Couldn't convert: ", object_class_batch)
           sys.exit(1)
       
-      object_class_batch = np.expand_dims(object_class_batch, 2)
+      #object_class_batch = object_class_batch
       next_object_locs_batch  = np.array(next_object_locs_batch)
       next_object_class_batch = np.array(next_object_class_batch)
-      next_object_class_batch = np.expand_dims(next_object_class_batch, 2)
+      #next_object_class_batch = np.expand_dims(next_object_class_batch, 2)
 
      
  
@@ -895,8 +973,8 @@ class QLearner(object):
 
       self.log_data.append({"timestep": self.t, "mean": self.mean_episode_reward, "best": self.best_mean_episode_reward})
 
-      if self.t > 52000:
-          sys.exit(1)
+     # if self.t > 52000:
+     #     sys.exit(1)
 
       with open(self.rew_file, 'wb') as f:
         pickle.dump(self.log_data, f, pickle.HIGHEST_PROTOCOL)
