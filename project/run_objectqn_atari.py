@@ -28,6 +28,7 @@ def build_arg_parser():
                                              "assault", "beamrider", "carnival", "phoenix",
                                              "riverraid"])
     parser.add_argument("--explore", default=1.0, type=float)
+    parser.add_argument("--src_model", default=None)
     parser.add_argument("--vision", action="store_true")
     parser.add_argument("--objects", action="store_true")
     parser.add_argument("--templatedir", default="/home/workspace/homework/templates")
@@ -79,7 +80,8 @@ def atari_learn(env,
                 explore=1.0,
                 vision=True,
                 obj=False,
-                template_dir="/home/dguillory/workspace/homework/templates"):
+                template_dir="/home/dguillory/workspace/homework/templates",
+                source_model=None):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -117,6 +119,7 @@ def atari_learn(env,
     if obj: 
         task2 = task2 + "_obj"
 
+    print("Source: ", source)
     if source is not None:
         rew_file = task2 + "_from_" + source + uid + ".pkl"
         mod_file = task2 + "_from_" + source + uid 
@@ -152,7 +155,8 @@ def atari_learn(env,
         preload=preload,
         vision=vision,
         objects=obj,
-        template_dir=template_dir
+        template_dir=template_dir,
+        source_model=source_model
     )
     env.close()
 
@@ -222,30 +226,30 @@ def main():
     
     second_task = None
     if args.model == "visual":
-        if args.source == "pong":
-            second_task = 'PongNoFrameskip-v4'
-        elif args.source == "assault":
-            second_task = 'AssaultNoFrameskip-v4'
-        elif args.source == 'zaxxon':
-            second_task = 'ZaxxonNoFrameskip-v4'
-        elif args.source == 'spaceinvaders':
-            second_task = 'SpaceInvadersNoFrameskip-v4'
-        elif args.source == 'airraid':
-            second_task = 'AirRaidNoFrameskip-v4'
-        elif args.source == 'beamrider':
-            second_task = 'BeamRiderNoFrameskip-v4'
-        elif args.source == 'carnival':
-            second_task = "CarnivalNoFrameskip-v4"
-        elif args.source == "phoenix":
-            second_task = "PhoenixNoFrameskip-v4"
-        elif args.source == "riverraid":
-            second_task = "RiverraidNoFrameskip-v4"
-        
         model = atari_visual_freeze 
     else:
         model = atari_model
 
 
+    if args.source == "pong":
+        second_task = 'PongNoFrameskip-v4'
+    elif args.source == "assault":
+        second_task = 'AssaultNoFrameskip-v4'
+    elif args.source == 'zaxxon':
+        second_task = 'ZaxxonNoFrameskip-v4'
+    elif args.source == 'spaceinvaders':
+        second_task = 'SpaceInvadersNoFrameskip-v4'
+    elif args.source == 'airraid':
+        second_task = 'AirRaidNoFrameskip-v4'
+    elif args.source == 'beamrider':
+        second_task = 'BeamRiderNoFrameskip-v4'
+    elif args.source == 'carnival':
+        second_task = "CarnivalNoFrameskip-v4"
+    elif args.source == "phoenix":
+        second_task = "PhoenixNoFrameskip-v4"
+    elif args.source == "riverraid":
+        second_task = "RiverraidNoFrameskip-v4"
+        
     # Get Atari games.
     #task = gym.make('PongNoFrameskip-v4')
     #task = gym.make('Zaxxon-v4')
@@ -256,7 +260,7 @@ def main():
     env = get_env(task, seed)
     session = get_session()
     atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore,
-            vision=args.vision, obj=args.objects, template_dir=args.templatedir)
+            vision=args.vision, obj=args.objects, template_dir=args.templatedir, source_model=args.src_model)
 
 if __name__ == "__main__":
     main()

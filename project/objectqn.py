@@ -27,13 +27,15 @@ OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedu
 
 def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
 
+    loc_size = 3
     with tf.variable_scope(scope, reuse=reuse):
         #out = layers.flatten(objects_in)
         s = tf.shape(objects_in)
         out = objects_in
         #out = tf.reshape(objects_in, [-1 ,s[2]]) 
         print("Objects shape: ", out)
-        out = tf.reshape(objects_in, [-1 ,2]) 
+        #out = tf.reshape(objects_in, [-1 ,2]) 
+        out = tf.reshape(objects_in, [-1 ,loc_size]) 
         print("Objects shape: ", out)
         out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
         out = layers.fully_connected(out, num_outputs=64, activation_fn=tf.nn.relu)
@@ -45,7 +47,7 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
         softm_reshape = tf.reshape(softm, [-1, num_slots, max_length])
 
         new_att = tf.matmul(softm_reshape, objects_in) / float(max_length)
-        new_att = tf.reshape(new_att, [-1, num_slots*2])
+        new_att = tf.reshape(new_att, [-1, num_slots*loc_size])
         print("Att final: ", new_att)
         return new_att
 
@@ -96,9 +98,9 @@ def tm_tf(img_in, template_in, identity_template, scope, threshold=0.5, reuse=Fa
         normed_im_sq = tf.nn.convolution(tf.square(normed_im), identity_template, "SAME")
         template_mean = tf.reduce_sum(tf.square(template_in), axis=[0,1,2])
 
-        print_op = tf.print("Normed im shape: ", normed_im.shape, "\nRes  Shape: ", res.shape,
-                "\nNormed Im Square Shape: ", normed_im_sq.shape, "\nTemplate Mean Shape: ", 
-                template_mean.shape, output_stream=sys.stderr)
+        #print_op = tf.print("Normed im shape: ", normed_im.shape, "\nRes  Shape: ", res.shape,
+        #        "\nNormed Im Square Shape: ", normed_im_sq.shape, "\nTemplate Mean Shape: ", 
+        #        template_mean.shape, output_stream=sys.stderr)
         res = res / tf.sqrt(normed_im_sq * template_mean)
 
         object_locs = tf.where(res > threshold)
@@ -106,11 +108,11 @@ def tm_tf(img_in, template_in, identity_template, scope, threshold=0.5, reuse=Fa
         ind = tf.constant([1,2,3])
         ind_labels = tf.constant([4])
 
-        print_op_2 = tf.print("Object locs: ", object_locs, summarize=100,  output_stream=sys.stderr)
+        #print_op_2 = tf.print("Object locs: ", object_locs, summarize=100,  output_stream=sys.stderr)
 
-        with tf.control_dependencies([print_op, print_op_2]):
-            locs = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind))
-            labels = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind_labels))
+        #with tf.control_dependencies([print_op, print_op_2]):
+        locs = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind))
+        labels = tf.transpose(tf.nn.embedding_lookup(tf.transpose(object_locs), ind_labels))
     
     return locs, labels
     #return object_values, labels
@@ -355,6 +357,7 @@ class QLearner(object):
     #self.templates = np.tile(self.templates, [1, 1, frame_history_len, 1])
     self.templates = np.expand_dims(self.templates, 3)
     print("Tiled Shape: ", self.templates.shape)
+    
     self.templates = tf.constant(self.templates)
     self.templates_float = tf.cast(self.templates, tf.float32) / 255.0
 
@@ -396,7 +399,7 @@ class QLearner(object):
         # placeholder for templates
         self.template_loc_ph = tf.placeholder(
                 tf.float32,
-                shape=(None, self.max_length, 2), #shape=(None, None, 2),
+                shape=(None, self.max_length, 3), #shape=(None, None, 2),
                 name="templates"
                 )
 
@@ -406,7 +409,7 @@ class QLearner(object):
 
         self.template_loc_t_ph = tf.placeholder(
                 tf.float32,
-                shape=(None, self.max_length, 2),
+                shape=(None, self.max_length, 3),
                 name="templates_next"
                 )
 
@@ -588,7 +591,7 @@ class QLearner(object):
     """
     object_detections = self.session.run([self.obj_det], feed_dict={self.obs_obj_ph: new_frame})
     object_locs = object_detections[0][0]
-    print("Object Locs In This Matching Module: ", object_locs)
+    #print("Object Locs In This Matching Module: ", object_locs)
     #print("Object Locs Max, Min: ", (max(object_locs), min(object_locs)))
     #print("Object Locs Shape: ", len(object_locs))
     #if random.random() > 0.95: 
@@ -665,10 +668,10 @@ class QLearner(object):
             object_locs, object_labels = self.full_template_matching(last_frame)
             #object_locs, object_labels = self.full_template_matching(net_in)
 
-            print("Object Values: ", object_locs)
-            print("Object Values Shape: ", len(object_locs))
+            #print("Object Values: ", object_locs)
+            #print("Object Values Shape: ", len(object_locs))
 
-            sys.exit(1)
+            #sys.exit(1)
 
             # REMOVE THIS BLOCK SOON
             """
@@ -683,7 +686,7 @@ class QLearner(object):
             #print("Second Objects len: ", len(objects))
             
             #objects = template_matching_fft(last_frame, self.templates) #add threshold arg
-            template_loc = np.expand_dims(np.array(padding_func(object_locs, self.max_length, 2)), 0)
+            template_loc = np.expand_dims(np.array(padding_func(object_locs, self.max_length, 3)), 0)
             template_class = np.expand_dims(np.array(padding_func(object_labels, self.max_length, 1)), 0)
             action = self.session.run([self.best_action], feed_dict={self.obs_t_ph: input_encoding,
                                                                      self.template_loc_ph: template_loc,
@@ -776,9 +779,9 @@ class QLearner(object):
           #print("first frame")
           object_locs, object_labels = self.full_template_matching(last_frame)
           
-          print("Object Values: ", object_locs)
-          print("Object Values Shape: ", len(object_locs))
-          sys.exit(1)
+          #print("Object Values: ", object_locs)
+          #print("Object Values Shape: ", len(object_locs))
+          #sys.exit(1)
           #object_locs, object_labels = self.full_template_matching(net_in)
           
           # Remove IMMEDIATELY
@@ -787,7 +790,8 @@ class QLearner(object):
           
           #objects = template_matching_fft(last_frame, self.templates) #add threshold arg
           template_loc = object_locs
-          template_loc = np.array(padding_func(template_loc, self.max_length, 2))
+          #template_loc = np.array(padding_func(template_loc, self.max_length, 2))
+          template_loc = np.array(padding_func(template_loc, self.max_length, 3))
 
           template_class = object_labels
           template_class = np.array(padding_func(template_class, self.max_length, 1))
@@ -814,7 +818,8 @@ class QLearner(object):
           
           
           next_template_loc = next_object_locs
-          next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
+          #next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 2))
+          next_template_loc = np.array(padding_func(next_template_loc, self.max_length, 3))
           next_template_class = next_object_labels
           next_template_class = np.array(padding_func(next_template_class, self.max_length, 1))
           next_object_locs_batch.append(next_template_loc)
