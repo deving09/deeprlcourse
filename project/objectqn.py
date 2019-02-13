@@ -651,7 +651,14 @@ class QLearner(object):
     # YOUR CODE HERE
     last_obs = self.last_obs 
     frame_idx = self.replay_buffer.store_frame(last_obs)    
-    
+   
+    """
+    while True:
+	if animate_this_episode:
+	    env.render()
+	    time.sleep(0.1)
+    """
+
     if self.model_initialized:
         epsilon = self.exploration.value(self.t)
         if random.random() < epsilon:
