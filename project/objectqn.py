@@ -51,6 +51,12 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
         print("Att final: ", new_att)
         return new_att
 
+
+def random_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
+    loc_size = 3
+    s = tf.shape(objects_in)
+    return tf.random.uniform([s[0], num_slots * loc_size])
+
 def vision_model(img_in, scope, reuse=False):
     # as described in https://storage.googleapis.com/deepmind-data/assets/papers/DeepMindNature14236Paper.pdf
     with tf.variable_scope(scope, reuse=reuse):
@@ -235,7 +241,8 @@ class QLearner(object):
     objects=True,
     template_dir="/home/dguillory/workspace/homework/templates",
     max_length=50,
-    source_model=None):
+    source_model=None,
+    random=False):
     """Run Deep Q-learning algorithm.
 
     You can specify your own convnet using q_func.
@@ -319,6 +326,8 @@ class QLearner(object):
     self.max_length = max_length
     self.threshold = 0.5
     self.source_model = source_model
+    self.finished_game = False
+    self.random = random
 
     self.pool = Pool(processes=16)
     
@@ -548,11 +557,20 @@ class QLearner(object):
         att_rep = attention_model(object_candidates, self.num_slots, self.max_length, scope=scope+"_attention_model", reuse=reuse)
         print(att_rep)
 
+    if self.random:
+        print("RANDOM ATTENTION")
+        # Do Processing for template matching
+        object_one_hot = tf.squeeze(tf.one_hot(template_class_ph + 1, self.template_cnt + 1))
+        #object_candidates = tf.concat([template_loc_ph, object_one_hot], 2)
+        object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
+        att_rep = random_model(object_candidates, self.num_slots, self.max_length, scope=scope+"_attention_model", reuse=reuse)
+        print(att_rep)
+
     if self.vision:
         # Do Processing for visual parts
         vision_rep = vision_model(obs_t_float, scope=scope+ "_vision_model", reuse=reuse)
 
-    if self.objects and self.vision:
+    if (self.objects or self.random) and self.vision:
         rep = tf.concat([vision_rep, att_rep], 1)
     elif self.objects:
         rep = att_rep
@@ -652,13 +670,8 @@ class QLearner(object):
     last_obs = self.last_obs 
     frame_idx = self.replay_buffer.store_frame(last_obs)    
    
-    """
-    while True:
-	if animate_this_episode:
-	    env.render()
-	    time.sleep(0.1)
-    """
-
+    #if True:  #animate_this_episode:
+    
     if self.model_initialized:
         epsilon = self.exploration.value(self.t)
         if random.random() < epsilon:
@@ -707,14 +720,87 @@ class QLearner(object):
     obs, reward, done, info = self.env.step(action)
     self.replay_buffer.store_effect(frame_idx, action, reward, done)
     
+    if self.t % self.log_every_n_steps == 0 and self.model_initialized:
+        self.env.render()
+        time.sleep(0.02)
+    
     if done:
         self.last_obs = self.env.reset()
     else:
         self.last_obs = obs
 
-    
-        
 
+  # Step to simulate game
+  def step_game(self):
+    
+    self.env.render()
+    time.sleep(0.03)
+
+    last_obs = self.last_obs 
+    frame_idx = self.replay_buffer.store_frame(last_obs)    
+    net_in = self.replay_buffer.encode_recent_observation()
+
+    input_encoding = np.expand_dims(net_in, 0)
+    
+    last_frame = net_in[:, :, 0::self.img_c]
+
+    object_locs, object_labels = self.full_template_matching(last_frame)
+    template_loc = np.expand_dims(np.array(padding_func(object_locs, self.max_length, 3)), 0)
+    template_class = np.expand_dims(np.array(padding_func(object_labels, self.max_length, 1)), 0)
+    action = self.session.run([self.best_action], feed_dict={self.obs_t_ph: input_encoding,
+                                                             self.template_loc_ph: template_loc,
+                                                             self.template_class_ph: template_class})[0]
+    
+    obs, reward, done, info = self.env.step(action)
+    self.replay_buffer.store_effect(frame_idx, action, reward, done)
+    
+    if done:
+        self.last_obs = self.env.reset()
+        self.finished_game = True
+    else:
+        self.last_obs = obs
+  
+  
+  def initialize_model(self):
+      """
+      #with tf.variable_scope("q_func", reuse=tf.AUTO_REUSE):
+          #tqf = tf.get_variable("target_q_func/action_value/fully_connected_1/weights", shape=[512, 8])
+          #qf = tf.get_variable("q_func/action_value/fully_connected_1/weights", shape=[512, 8])
+          #tqf = tf.assign(tqf, tf.placeholder(tf.float32, [None, 18]), validate_shape=False)
+          #qf = tf.assign(qf, tf.placeholder(tf.float32, [None, 18]), validate_shape=False)
+      """
+
+      print("LOADING A SAVED MODEL")
+      #self.saver.restore(self.session, "/home/dguillory/workspace/homework/models/SpaceInvadersNoFrameskip-v4.ckpt")
+      #self.saver.restore(self.session, "/home/dguillory/workspace/homework/models/ZaxxonNoFrameskip-v4.ckpt")
+      #self.save_model()
+      #1/0
+      
+      
+      if self.preload and self.src_task is not None:
+          #chkp.print_tensors_in_checkpoint_file("/home/dguillory/workspace/homework/test_models/" + self.src_task + "/variables/variables", tensor_name='', all_tensors=True)
+          print ("BREAK After test models \n\n")
+          #chkp.print_tensors_in_checkpoint_file("/home/dguillory/workspace/homework/models/" + self.src_task + ".ckpt", tensor_name='', all_tensors=True)
+          #1/0
+          print(tf.global_variables())
+          #print([n.name for n in tf.get_default_graph().as_graph_def().node])
+
+          #uncomment
+          variables_to_restore = [var for var in tf.global_variables() if "convnet" in var.name]
+          saver = tf.train.Saver()# variables_to_restore)
+
+          #saver.restore(self.session, "/home/dguillory/workspace/homework/models/" + self.src_task +".ckpt")
+          saver.restore(self.session, self.source_model)
+          
+          #print("/home/dguillory/workspace/homework/test_models/" + self.src_task)
+          #tf.saved_model.loader.load(self.session, [tf.saved_model.tag_constants.TRAINING], "/home/dguillory/workspace/homework/test_models/" + self.src_task)
+          print("AFTER LOAD")
+          print(tf.global_variables())
+          #print([n.name for n in tf.get_default_graph().as_graph_def().node])
+
+      
+      self.model_initialized = True
+      
 
   def update_model(self):
     ### 3. Perform experience replay and train the network.
@@ -849,47 +935,10 @@ class QLearner(object):
      
  
       if not self.model_initialized:
-          """
-          #with tf.variable_scope("q_func", reuse=tf.AUTO_REUSE):
-              #tqf = tf.get_variable("target_q_func/action_value/fully_connected_1/weights", shape=[512, 8])
-              #qf = tf.get_variable("q_func/action_value/fully_connected_1/weights", shape=[512, 8])
-              #tqf = tf.assign(tqf, tf.placeholder(tf.float32, [None, 18]), validate_shape=False)
-              #qf = tf.assign(qf, tf.placeholder(tf.float32, [None, 18]), validate_shape=False)
-          """
-
-          print("LOADING A SAVED MODEL")
-          #self.saver.restore(self.session, "/home/dguillory/workspace/homework/models/SpaceInvadersNoFrameskip-v4.ckpt")
-          #self.saver.restore(self.session, "/home/dguillory/workspace/homework/models/ZaxxonNoFrameskip-v4.ckpt")
-          #self.save_model()
-          #1/0
-          
           initialize_interdependent_variables(self.session, tf.global_variables(), {
-              self.obs_t_ph: obs_batch,
-              self.obs_tp1_ph: next_obs_batch})
-          
-          if self.preload and self.src_task is not None:
-              #chkp.print_tensors_in_checkpoint_file("/home/dguillory/workspace/homework/test_models/" + self.src_task + "/variables/variables", tensor_name='', all_tensors=True)
-              print ("BREAK After test models \n\n")
-              #chkp.print_tensors_in_checkpoint_file("/home/dguillory/workspace/homework/models/" + self.src_task + ".ckpt", tensor_name='', all_tensors=True)
-              #1/0
-              print(tf.global_variables())
-              #print([n.name for n in tf.get_default_graph().as_graph_def().node])
-
-              #uncomment
-              variables_to_restore = [var for var in tf.global_variables() if "convnet" in var.name]
-              saver = tf.train.Saver(variables_to_restore)
-
-              #saver.restore(self.session, "/home/dguillory/workspace/homework/models/" + self.src_task +".ckpt")
-              saver.restore(self.session, self.source_model)
-              
-              #print("/home/dguillory/workspace/homework/test_models/" + self.src_task)
-              #tf.saved_model.loader.load(self.session, [tf.saved_model.tag_constants.TRAINING], "/home/dguillory/workspace/homework/test_models/" + self.src_task)
-              print("AFTER LOAD")
-              print(tf.global_variables())
-              #print([n.name for n in tf.get_default_graph().as_graph_def().node])
-
-          
-          self.model_initialized = True
+             self.obs_t_ph: obs_batch,
+             self.obs_tp1_ph: next_obs_batch})
+          self.initialize_model()
       
       gradients, tot_err, target_q, base_q = self.session.run([self.train_fn, self.total_error, self.target_q, self.base_q], feed_dict={
                                                                                self.obs_t_ph: obs_batch,
@@ -937,7 +986,7 @@ class QLearner(object):
           strip_default_attrs=True,
 	  clear_devices=True)
       b.save()
-      dirpath = "/home/dguillory/workspace/homework/test_models/" + self.mod_file
+      dirpath = "../test_models/" + self.mod_file
       if os.path.exists(dirpath) and os.path.isdir(dirpath):
           shutil.rmtree(dirpath)
       shutil.move("/tmp/" + self.mod_file, dirpath)
@@ -954,7 +1003,7 @@ class QLearner(object):
         print("SAVING SAVING")
         print(self.mod_file)
         self._last_save = self.t
-        self.saver.save(self.session, "/home/dguillory/workspace/homework/models/" + self.mod_file + ".ckpt")
+        self.saver.save(self.session, "../models/" + self.mod_file + ".ckpt")
         """
         tf.saved_model.simple_save(self.session, "/tmp/" + self.mod_file,
                                    inputs={"obs_t_ph": self.obs_t_ph},
@@ -1000,4 +1049,12 @@ def learn(*args, **kwargs):
     # observation
     alg.update_model()
     alg.log_progress()
+
+def play(*args, **kwargs):
+    new_kwargs = []
+
+    alg = QLearner(*args, **kwargs)
+    alg.initialize_model()
+    while not alg.finished_game:
+        alg.step_game()
 

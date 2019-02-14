@@ -31,6 +31,8 @@ def build_arg_parser():
     parser.add_argument("--src_model", default=None)
     parser.add_argument("--vision", action="store_true")
     parser.add_argument("--objects", action="store_true")
+    parser.add_argument("--random", action="store_true")
+    parser.add_argument("--simulate", action="store_true")
     parser.add_argument("--templatedir", default="/home/workspace/homework/templates")
     parser.add_argument("--cuda", default="3", type=str)
     return parser
@@ -81,7 +83,9 @@ def atari_learn(env,
                 vision=True,
                 obj=False,
                 template_dir="/home/dguillory/workspace/homework/templates",
-                source_model=None):
+                source_model=None,
+                simulate=False,
+                random=False):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -118,6 +122,8 @@ def atari_learn(env,
         task2 = task2 + "_vision"
     if obj: 
         task2 = task2 + "_obj"
+    if random: 
+        task2 = task2 + "_random"
 
     print("Source: ", source)
     if source is not None:
@@ -130,34 +136,66 @@ def atari_learn(env,
 
     print("MODEL FILE")
     print(mod_file)
+    
+    if simulate:
+        objectqn.play(
+            env=env,
+            q_func=model,
+            optimizer_spec=optimizer,
+            session=session,
+            exploration=exploration_schedule,
+            stopping_criterion=stopping_criterion,
+            #replay_buffer_size=1000000,
+            replay_buffer_size=100000,
+            batch_size=32,
+            gamma=0.99,
+            learning_starts=50000,
+            learning_freq=4,
+            frame_history_len=4,
+            target_update_freq=10000,
+            grad_norm_clipping=10,
+            double_q=True,
+            rew_file=rew_file,
+            mod_file=mod_file,
+            target_task=task,
+            src_task=source,
+            preload=preload,
+            vision=vision,
+            objects=obj,
+            template_dir=template_dir,
+            source_model=source_model,
+            random=random
+        )
 
-    objectqn.learn(
-        env=env,
-        q_func=model,
-        optimizer_spec=optimizer,
-        session=session,
-        exploration=exploration_schedule,
-        stopping_criterion=stopping_criterion,
-        #replay_buffer_size=1000000,
-        replay_buffer_size=100000,
-        batch_size=32,
-        gamma=0.99,
-        learning_starts=50000,
-        learning_freq=4,
-        frame_history_len=4,
-        target_update_freq=10000,
-        grad_norm_clipping=10,
-        double_q=True,
-        rew_file=rew_file,
-        mod_file=mod_file,
-        target_task=task,
-        src_task=source,
-        preload=preload,
-        vision=vision,
-        objects=obj,
-        template_dir=template_dir,
-        source_model=source_model
-    )
+    else:
+        objectqn.learn(
+            env=env,
+            q_func=model,
+            optimizer_spec=optimizer,
+            session=session,
+            exploration=exploration_schedule,
+            stopping_criterion=stopping_criterion,
+            #replay_buffer_size=1000000,
+            replay_buffer_size=100000,
+            batch_size=32,
+            gamma=0.99,
+            learning_starts=50000,
+            learning_freq=4,
+            frame_history_len=4,
+            target_update_freq=10000,
+            grad_norm_clipping=10,
+            double_q=True,
+            rew_file=rew_file,
+            mod_file=mod_file,
+            target_task=task,
+            src_task=source,
+            preload=preload,
+            vision=vision,
+            objects=obj,
+            template_dir=template_dir,
+            source_model=source_model,
+            random=random
+        )
     env.close()
 
 def get_available_gpus():
@@ -260,7 +298,8 @@ def main():
     env = get_env(task, seed)
     session = get_session()
     atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore,
-            vision=args.vision, obj=args.objects, template_dir=args.templatedir, source_model=args.src_model)
+            vision=args.vision, obj=args.objects, template_dir=args.templatedir, source_model=args.src_model, 
+            simulate=args.simulate, random=args.random)
 
 if __name__ == "__main__":
     main()
