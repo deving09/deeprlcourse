@@ -51,6 +51,31 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
         print("Att final: ", new_att)
         return new_att
 
+def grid_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
+
+    loc_size = 3
+    with tf.variable_scope(scope, reuse=reuse):
+        #out = layers.flatten(objects_in)
+        s = tf.shape(objects_in)
+        out = objects_in
+        #out = tf.reshape(objects_in, [-1 ,s[2]]) 
+        print("Objects shape: ", out)
+        #out = tf.reshape(objects_in, [-1 ,2]) 
+        out = tf.reshape(objects_in, [-1 ,loc_size]) 
+        print("Objects shape: ", out)
+        out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
+        out = layers.fully_connected(out, num_outputs=64, activation_fn=tf.nn.relu)
+        out = layers.fully_connected(out, num_outputs=num_slots, activation_fn=None)
+        out = tf.reshape(out, [-1, max_length, num_slots])
+
+        softm = tf.exp(out * beta) /tf.expand_dims( tf.reduce_sum(tf.exp(out * beta), 1), 1)
+
+        softm_reshape = tf.reshape(softm, [-1, num_slots, max_length])
+
+        new_att = tf.matmul(softm_reshape, objects_in) / float(max_length)
+        new_att = tf.reshape(new_att, [-1, num_slots*loc_size])
+        print("Att final: ", new_att)
+        return new_att
 
 def random_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
     loc_size = 3
@@ -743,6 +768,8 @@ class QLearner(object):
     input_encoding = np.expand_dims(net_in, 0)
     
     last_frame = net_in[:, :, 0::self.img_c]
+
+    aaa = 31
 
     object_locs, object_labels = self.full_template_matching(last_frame)
     template_loc = np.expand_dims(np.array(padding_func(object_locs, self.max_length, 3)), 0)
