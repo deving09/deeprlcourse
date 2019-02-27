@@ -326,7 +326,7 @@ class QLearner(object):
     self.max_length = max_length
     self.threshold = 0.5
     self.source_model = source_model
-    self.finished_game = False
+    self.finished_game = 0
     self.random = random
 
     self.pool = Pool(processes=16)
@@ -756,7 +756,7 @@ class QLearner(object):
     
     if done:
         self.last_obs = self.env.reset()
-        self.finished_game = True
+        self.finished_game += 1
     else:
         self.last_obs = obs
   
@@ -1055,6 +1055,6 @@ def play(*args, **kwargs):
 
     alg = QLearner(*args, **kwargs)
     alg.initialize_model()
-    while not alg.finished_game:
+    while alg.finished_game < 5:
         alg.step_game()
 
