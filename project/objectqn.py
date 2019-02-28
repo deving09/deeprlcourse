@@ -27,7 +27,7 @@ OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedu
 
 def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
 
-    loc_size = 3
+    loc_size = 18
     with tf.variable_scope(scope, reuse=reuse):
         #out = layers.flatten(objects_in)
         s = tf.shape(objects_in)
@@ -35,8 +35,10 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
         #out = tf.reshape(objects_in, [-1 ,s[2]]) 
         print("Objects shape: ", out)
         #out = tf.reshape(objects_in, [-1 ,2]) 
+        
+        # LAST REMOVAL
         out = tf.reshape(objects_in, [-1 ,loc_size]) 
-        print("Objects shape: ", out)
+        print("Objects attention reshape: ", out)
         out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
         out = layers.fully_connected(out, num_outputs=64, activation_fn=tf.nn.relu)
         out = layers.fully_connected(out, num_outputs=num_slots, activation_fn=None)
@@ -46,6 +48,8 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
 
         softm_reshape = tf.reshape(softm, [-1, num_slots, max_length])
 
+        print("Softm_reshape: ", softm_reshape)
+        print("Softm: ", softm)
         new_att = tf.matmul(softm_reshape, objects_in) / float(max_length)
         new_att = tf.reshape(new_att, [-1, num_slots*loc_size])
         print("Att final: ", new_att)
@@ -53,14 +57,19 @@ def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta
 
 def grid_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
 
+    """
+    self.template_loc_t_ph = tf.placeholder(
+            tf.float32,
+            shape=(None, self.max_length, 3),
+            name="templates_next"
+            )
+    """
     loc_size = 3
     with tf.variable_scope(scope, reuse=reuse):
-        #out = layers.flatten(objects_in)
+        
         s = tf.shape(objects_in)
         out = objects_in
-        #out = tf.reshape(objects_in, [-1 ,s[2]]) 
         print("Objects shape: ", out)
-        #out = tf.reshape(objects_in, [-1 ,2]) 
         out = tf.reshape(objects_in, [-1 ,loc_size]) 
         print("Objects shape: ", out)
         out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
@@ -147,48 +156,6 @@ def tm_tf(img_in, template_in, identity_template, scope, threshold=0.5, reuse=Fa
     
     return locs, labels
     #return object_values, labels
-
-def template_matching_2(last_frame, templates, threshold=0.5):
-
-    # ALL TEMPLATE MATCHING STUFF
-    all_object_locs = []
-    for num in range(0,len(templates)):
-        res = cv2.matchTemplate(last_frame, templates[num],cv2.TM_CCOEFF_NORMED)
-        object_locs = np.where(res >= threshold)
-        object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
-        suppressed_locs = object_locs #cluster_detections(object_locs)
-        labeled_objects = [(x,y, num) for x,y in suppressed_locs]
-        all_object_locs += labeled_objects
-
-    #print("object_locs", all_object_locs)
-    
-    return all_object_locs
-
-
-def template_matching_fft(last_frame, templates, threshold=0.05):
-    bx = last_frame.shape[0]
-    by = last_frame.shape[1]
-
-    all_object_locs = []
-    Ga = np.fft.fft2(last_frame)
-    for num in range(0, len(templates)):
-        tx = last_frame.shape[0]
-        ty = last_frame.shape[1]
-        Gb = np.fft.fft2(templates[num], [bx, by])
-
-        res =  np.absolute(np.real(np.fft.ifft2(np.divide(np.multiply(Ga, np.conj(Gb)), np.absolute(np.multiply(Ga, np.conj(Gb)))))))
-        #print("RES: ", res)
-        #print("Max: ", np.max(res))
-        #1/0
-        object_locs = np.where(res >= threshold)
-        #print("Object Locs: ", object_locs)
-        object_locs = list(zip(list(object_locs[0]), list(object_locs[1])))
-        suppressed_locs = object_locs #cluster_detections(object_locs)
-        labeled_objects = [(x,y, num) for x,y in suppressed_locs]
-        all_object_locs += labeled_objects
-
-    #print("all objects locs", all_object_locs)
-    return all_object_locs
 
 
 def cluster_detections( object_locs, radius=3.0):
@@ -347,7 +314,7 @@ class QLearner(object):
     self.preload = preload
     self.vision = vision
     self.objects = objects
-    self.num_slots = 3
+    self.num_slots = 5
     self.max_length = max_length
     self.threshold = 0.5
     self.source_model = source_model
@@ -358,10 +325,11 @@ class QLearner(object):
     
     files = [ os.path.join(template_dir, f) for f in os.listdir(template_dir) if os.path.isfile(os.path.join(template_dir, f))]
     
-    #new_temp = np.expand_dims(np.expand_dims(self.templates[num], 2), 3)
     self.templates_list = [np.expand_dims(cv2.imread(f, 0),2) for f in files]
     self.templates =  [t - np.mean(t) for t in self.templates_list]
     self.template_cnt = len(self.templates)
+
+    print("Templates Cnt: %d" %self.template_cnt)
 
     big_w = 0
     big_h = 0
@@ -371,10 +339,6 @@ class QLearner(object):
             big_w = s[0]
         if s[1] > big_h:
             big_h = s[1]
-        #print("Shape: ", s)
-
-    print("Big W: ", big_w)
-    print("Big H: ", big_h)
 
     for i, im in enumerate(self.templates):
         s = im.shape
@@ -383,18 +347,15 @@ class QLearner(object):
         lh_pad = (big_h - s[1]) // 2 + (big_h - s[1]) % 2
         rh_pad = (big_h - s[1]) // 2
         im = np.pad(im, [[lw_pad, rw_pad], [lh_pad, rh_pad], [0, 0]], "constant")
-        print("Im Shape: ", im.shape)
         self.templates[i] = im
 
     self.templates = np.stack(self.templates, axis=3)
-    print("Shape Again: ", self.templates.shape)
-    #self.templates = np.tile(self.templates, [1, 1, frame_history_len, 1])
     self.templates = np.expand_dims(self.templates, 3)
-    print("Tiled Shape: ", self.templates.shape)
     
     self.templates = tf.constant(self.templates)
     self.templates_float = tf.cast(self.templates, tf.float32) / 255.0
 
+    print("Templates Size: ", self.templates_float)
     self.identity_template = tf.ones([big_w, big_h, 1, 1, 1], tf.float32)
  
     ###############
@@ -411,17 +372,14 @@ class QLearner(object):
             #Place in neater locations
             self.img_c = img_c
             input_shape = (img_h, img_w, frame_history_len * img_c)
-            #input_tmp_shape =  (img_h, img_w, 1)
             
             input_tmp_shape =  (img_h, img_w, frame_history_len, 1)
-            print("INPUT SHAPE")
-            print(input_shape)
+        
         self.num_actions = self.env.action_space.n
     
         # set up placeholders
 
         #Object Detection PH
-        #self.template_img_ph = tf.placeholder(tf.float32, shape=(big_w, big_h , 1, None),
         self.template_img_ph = tf.placeholder(tf.float32, shape=(big_w, big_h , frame_history_len, None),
                 name="template_img")
 
@@ -461,6 +419,7 @@ class QLearner(object):
         # placeholder for next observation (or state)
         self.obs_tp1_ph            = tf.placeholder(
             tf.float32 if lander else tf.uint8, [None] + list(input_shape))
+        
         # placeholder for end of episode mask
         # this value is 1 if the next state corresponds to the end of an episode,
         # in which case there is no Q-value at the next state; at the end of an
@@ -576,9 +535,16 @@ class QLearner(object):
     # Templates
     if self.objects:
         # Do Processing for template matching
-        object_one_hot = tf.squeeze(tf.one_hot(template_class_ph + 1, self.template_cnt + 1))
-        #object_candidates = tf.concat([template_loc_ph, object_one_hot], 2)
-        object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
+        #object_one_hot = tf.squeeze(tf.one_hot(template_class_ph + 1, self.template_cnt + 1))
+        object_one_hot = tf.reshape(tf.one_hot(template_class_ph + 1, self.template_cnt + 1), [-1, self.max_length, self.template_cnt + 1])
+        print("Object One Hot: ", object_one_hot)
+        tlocs = template_loc_ph #tf.expand_dims(template_loc_ph,2)
+        object_candidates = tf.concat([tlocs, object_one_hot], 2)
+        print("Object Candidates: ", object_candidates.shape)
+        
+        #object_candidates = tf.squeeze(object_candidates)
+        print("Object Candidates Squeezed: ", object_candidates.shape)
+        #object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
         att_rep = attention_model(object_candidates, self.num_slots, self.max_length, scope=scope+"_attention_model", reuse=reuse)
         print(att_rep)
 
