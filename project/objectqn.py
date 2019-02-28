@@ -25,9 +25,9 @@ import math
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
 
 
-def attention_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
+def attention_model(objects_in, num_slots, max_length, template_cnt,  scope, reuse=False, beta=20.0):
 
-    loc_size = 18
+    loc_size = template_cnt + 4
     with tf.variable_scope(scope, reuse=reuse):
         #out = layers.flatten(objects_in)
         s = tf.shape(objects_in)
@@ -535,17 +535,12 @@ class QLearner(object):
     # Templates
     if self.objects:
         # Do Processing for template matching
-        #object_one_hot = tf.squeeze(tf.one_hot(template_class_ph + 1, self.template_cnt + 1))
         object_one_hot = tf.reshape(tf.one_hot(template_class_ph + 1, self.template_cnt + 1), [-1, self.max_length, self.template_cnt + 1])
-        print("Object One Hot: ", object_one_hot)
-        tlocs = template_loc_ph #tf.expand_dims(template_loc_ph,2)
-        object_candidates = tf.concat([tlocs, object_one_hot], 2)
-        print("Object Candidates: ", object_candidates.shape)
         
-        #object_candidates = tf.squeeze(object_candidates)
-        print("Object Candidates Squeezed: ", object_candidates.shape)
-        #object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
-        att_rep = attention_model(object_candidates, self.num_slots, self.max_length, scope=scope+"_attention_model", reuse=reuse)
+        tlocs = template_loc_ph
+        object_candidates = tf.concat([tlocs, object_one_hot], 2)
+        
+        att_rep = attention_model(object_candidates, self.num_slots, self.max_length, self.template_cnt, scope=scope+"_attention_model", reuse=reuse)
         print(att_rep)
 
     if self.random:
