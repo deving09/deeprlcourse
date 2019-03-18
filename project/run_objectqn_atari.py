@@ -32,6 +32,7 @@ def build_arg_parser():
     parser.add_argument("--vision", action="store_true")
     parser.add_argument("--objects", action="store_true")
     parser.add_argument("--random", action="store_true")
+    parser.add_argument("--grid", action="store_true")
     parser.add_argument("--simulate", action="store_true")
     parser.add_argument("--templatedir", default="/home/workspace/homework/templates")
     parser.add_argument("--cuda", default="3", type=str)
@@ -85,7 +86,8 @@ def atari_learn(env,
                 template_dir="/home/dguillory/workspace/homework/templates",
                 source_model=None,
                 simulate=False,
-                random=False):
+                random=False,
+                grid=False):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -124,6 +126,8 @@ def atari_learn(env,
         task2 = task2 + "_obj"
     if random: 
         task2 = task2 + "_random"
+    if grid: 
+        task2 = task2 + "_grid"
 
     print("Source: ", source)
     if source is not None:
@@ -164,7 +168,8 @@ def atari_learn(env,
             objects=obj,
             template_dir=template_dir,
             source_model=source_model,
-            random=random
+            random=random,
+            grid=grid
         )
 
     else:
@@ -194,7 +199,8 @@ def atari_learn(env,
             objects=obj,
             template_dir=template_dir,
             source_model=source_model,
-            random=random
+            random=random,
+            grid=grid
         )
     env.close()
 
@@ -215,9 +221,11 @@ def set_global_seeds(i):
 
 def get_session():
     tf.reset_default_graph()
+    gpu_options = tf.GPUOptions(per_process_gpu_memory_fraction=0.45)
     tf_config = tf.ConfigProto(
         inter_op_parallelism_threads=1,
-        intra_op_parallelism_threads=1)
+        intra_op_parallelism_threads=1,
+        gpu_options=gpu_options)
     session = tf.Session(config=tf_config)
     print("AVAILABLE GPUS: ", get_available_gpus())
     return session
@@ -299,7 +307,7 @@ def main():
     session = get_session()
     atari_learn(env, session, num_timesteps=2e8, task=task, model=model, source=second_task, explore=args.explore,
             vision=args.vision, obj=args.objects, template_dir=args.templatedir, source_model=args.src_model, 
-            simulate=args.simulate, random=args.random)
+            simulate=args.simulate, random=args.random, grid=args.grid)
 
 if __name__ == "__main__":
     main()

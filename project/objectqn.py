@@ -55,36 +55,52 @@ def attention_model(objects_in, num_slots, max_length, template_cnt,  scope, reu
         print("Att final: ", new_att)
         return new_att
 
-def grid_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
+def grid_model(objects_in, num_slots, max_length, template_cnt, scope, w=200, h=200, t=3,reuse=False, beta=20.0):
 
-    """
-    self.template_loc_t_ph = tf.placeholder(
-            tf.float32,
-            shape=(None, self.max_length, 3),
-            name="templates_next"
-            )
-    """
-    loc_size = 3
+    
+    loc_size = template_cnt + 4
     with tf.variable_scope(scope, reuse=reuse):
         
         s = tf.shape(objects_in)
-        out = objects_in
-        print("Objects shape: ", out)
-        out = tf.reshape(objects_in, [-1 ,loc_size]) 
-        print("Objects shape: ", out)
-        out = layers.fully_connected(out, num_outputs=32, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(out, num_outputs=64, activation_fn=tf.nn.relu)
-        out = layers.fully_connected(out, num_outputs=num_slots, activation_fn=None)
-        out = tf.reshape(out, [-1, max_length, num_slots])
+        
+        out = tf.reshape(objects_in, [loc_size ,max_length, -1]) 
 
-        softm = tf.exp(out * beta) /tf.expand_dims( tf.reduce_sum(tf.exp(out * beta), 1), 1)
+        obj_img_loc_ind =  tf.constant([[0], [1], [2]])
 
-        softm_reshape = tf.reshape(softm, [-1, num_slots, max_length])
 
-        new_att = tf.matmul(softm_reshape, objects_in) / float(max_length)
-        new_att = tf.reshape(new_att, [-1, num_slots*loc_size])
-        print("Att final: ", new_att)
-        return new_att
+        #obj_img_loc_ind =  tf.stack([tf.range(0, s[0]), tf.range(0, s[0])], 1) 
+        #obj_img_loc_ind =  tf.tile(obj_img_loc_ind, [s[0] * max_length]) 
+        #obj_img_loc_ind = tf.reshape(obj_img_loc_ind, [-1, max_length, 1])
+        #obj_img_loc = tf.cast(tf.batch_gather(objects_in, obj_img_loc_ind), tf.int32)
+        
+        print("Grid Image Ind: ", obj_img_loc_ind.shape)
+        print("Grid Image Object shape: ", out.shape)
+        obj_img_loc = tf.cast(tf.gather_nd(out, obj_img_loc_ind), tf.int32)
+        print("Grid Image Loc: ", obj_img_loc.shape)
+
+        obj_img_vals_ind = tf.transpose(tf.constant([[a for a in range(3, loc_size)]]))
+        print("Obj img vals ind: ", obj_img_vals_ind.shape)
+        
+        #obj_img_vals = tf.batch_gather(objects_in, obj_img_vals_ind)
+        #obj_img_vals = tf.gather_nd(objects_in, obj_img_vals_ind)
+        obj_img_vals = tf.gather_nd(out, obj_img_vals_ind)
+        print("Grid Image Vals: ", obj_img_vals.shape)
+
+
+        batch_index = tf.tile(tf.expand_dims(tf.expand_dims(tf.range(s[0]), 1), 2), [1, max_length, 1])
+        print("Batch Index: ", batch_index.shape)
+
+        obj_img_loc = tf.reshape(obj_img_loc, [-1, max_length, 3])
+        obj_img_vals = tf.reshape(obj_img_vals, [-1, max_length, (loc_size-3)])
+
+        batch_img_loc = tf.concat([batch_index, obj_img_loc], 2)
+        print("Batch img loc: ", batch_img_loc.shape)
+        #object_im = tf.scatter_nd(obj_img_loc, obj_img_vals, [s[0], w, h, t, loc_size - 3])
+        object_im = tf.scatter_nd(batch_img_loc, obj_img_vals, [s[0], w, h, t, loc_size - 3])
+        object_im = tf.reshape(object_im, [-1, w, h, t*(template_cnt + 1)])
+        print("Grid Image Obj: ", object_im.shape)
+
+        return vision_model(object_im, scope=scope+"_obj_vision", reuse=reuse)
 
 def random_model(objects_in, num_slots, max_length,  scope, reuse=False, beta=20.0):
     loc_size = 3
@@ -108,7 +124,7 @@ def policy_model(representations, num_actions, scope, reuse=False):
     out = representations
     with tf.variable_scope(scope, reuse=reuse):
         with tf.variable_scope("action_value"):
-            out = layers.fully_connected(out, num_outputs=512,         activation_fn=tf.nn.relu)
+            out = layers.fully_connected(out, num_outputs=512, activation_fn=tf.nn.relu)
             out = layers.fully_connected(out, num_outputs=num_actions, activation_fn=None)
 
     return out
@@ -234,7 +250,8 @@ class QLearner(object):
     template_dir="/home/dguillory/workspace/homework/templates",
     max_length=50,
     source_model=None,
-    random=False):
+    random=False,
+    grid=False):
     """Run Deep Q-learning algorithm.
 
     You can specify your own convnet using q_func.
@@ -320,6 +337,7 @@ class QLearner(object):
     self.source_model = source_model
     self.finished_game = 0
     self.random = random
+    self.grid = grid
 
     self.pool = Pool(processes=16)
     
@@ -371,6 +389,9 @@ class QLearner(object):
 
             #Place in neater locations
             self.img_c = img_c
+            self.img_h = img_h
+            self.img_w = img_w
+            self.frame_history_len = frame_history_len
             input_shape = (img_h, img_w, frame_history_len * img_c)
             
             input_tmp_shape =  (img_h, img_w, frame_history_len, 1)
@@ -542,11 +563,22 @@ class QLearner(object):
         
         att_rep = attention_model(object_candidates, self.num_slots, self.max_length, self.template_cnt, scope=scope+"_attention_model", reuse=reuse)
         print(att_rep)
+    
+    if self.grid:
+        print("GRID ATTENTION")
+        # Do Processing for template matching
+        
+        object_one_hot = tf.reshape(tf.one_hot(template_class_ph + 1, self.template_cnt + 1), [-1, self.max_length, self.template_cnt + 1])
+        object_candidates = tf.concat([template_loc_ph, object_one_hot], 2)
+        #object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
+        att_rep = grid_model(object_candidates, self.num_slots, self.max_length, self.template_cnt, scope=scope+"_attention_model",
+                w=self.img_w, h=self.img_h, t=self.frame_history_len, reuse=reuse)
+        print(att_rep)
 
     if self.random:
         print("RANDOM ATTENTION")
         # Do Processing for template matching
-        object_one_hot = tf.squeeze(tf.one_hot(template_class_ph + 1, self.template_cnt + 1))
+        object_one_hot = tf.reshape(tf.one_hot(template_class_ph + 1, self.template_cnt + 1), [-1, self.max_length, self.template_cnt + 1])
         #object_candidates = tf.concat([template_loc_ph, object_one_hot], 2)
         object_candidates = template_loc_ph #object_one_hot #tf.concat([template_loc_ph, object_one_hot], 2)
         att_rep = random_model(object_candidates, self.num_slots, self.max_length, scope=scope+"_attention_model", reuse=reuse)
@@ -556,9 +588,12 @@ class QLearner(object):
         # Do Processing for visual parts
         vision_rep = vision_model(obs_t_float, scope=scope+ "_vision_model", reuse=reuse)
 
-    if (self.objects or self.random) and self.vision:
+    if (self.objects or self.random or self.grid) and self.vision:
+        print("Late Fusion Approach")
         rep = tf.concat([vision_rep, att_rep], 1)
     elif self.objects:
+        rep = att_rep
+    elif self.grid:
         rep = att_rep
     else:
         rep = vision_rep
@@ -706,9 +741,9 @@ class QLearner(object):
     obs, reward, done, info = self.env.step(action)
     self.replay_buffer.store_effect(frame_idx, action, reward, done)
     
-    if self.t % self.log_every_n_steps == 0 and self.model_initialized:
-        self.env.render()
-        time.sleep(0.02)
+    #if self.t % self.log_every_n_steps == 0 and self.model_initialized:
+    #    self.env.render()
+    #    time.sleep(0.02)
     
     if done:
         self.last_obs = self.env.reset()
